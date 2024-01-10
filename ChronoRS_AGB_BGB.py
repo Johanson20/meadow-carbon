@@ -10,31 +10,37 @@ data.head()
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
 ee.Initialize()
-
 landsat8_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
 
+
+# add B5 band value explicitly to properties of landsat
 def addB5(image):
     return image.set('B5_value', image.select('B5').reduceRegion(ee.Reducer.mean(), point, 30).get('B5'))
 
 
-NIR = []
+# extract unique years and create a dictionary of landsat data for each year
+years = set(x.split("/")[2] for x in data.loc[:, 'SampleDate'])
+landsat = {}
+for year in years:
+    landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
 
+
+NIR, peak_dates = [], []
 # populate bands by applying above functions for each pixel in dataframe
 for i in range(data.shape[0]):
     x, y = data.loc[i, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     year = data.loc[i, 'SampleDate'].split("/")[2]
 
-    temporal_filtered = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
-    spatial_filtered = temporal_filtered.filterBounds(point)
+    spatial_filtered = landsat[year].filterBounds(point)
     landsat8_with_b5 = spatial_filtered.map(addB5)
     sorted_collection = landsat8_with_b5.sort('B5_value', False)
-    NIR_value = sorted_collection.first().getInfo()['properties']['B5_value']
+    properties = sorted_collection.first().getInfo()['properties']
     
-    NIR.append(NIR_value)
+    peak_dates.append(properties['SENSING_TIME'][:10])
+    NIR.append(properties['B5_value'])
     
     if i%20 == 0: print(i, end=' ')
-# 20.342065 seconds for AGB
 
 # checks if they are all cloud free (should equal data.shape[0])
 ids = [x for x in NIR if x]
@@ -42,6 +48,7 @@ len(ids)
 
 # update and display first 10 rows of dataframe
 data['NIR'] = NIR
+data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
@@ -53,23 +60,27 @@ data = pd.read_csv("ChronoRS_BGB.csv")
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format = '%m/%d/%y')
 data.head()
 
-NIR = []
+years = set(x.split("/")[2] for x in data.loc[:, 'SampleDate'].strftime('%Y'))
+landsat = {}
+for year in years:
+    landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
+
+NIR, peak_dates = [], []
 
 for i in range(data.shape[0]):
     x, y = data.loc[i, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     year = data.loc[i, 'SampleDate'].strftime('%Y')
 
-    temporal_filtered = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
-    spatial_filtered = temporal_filtered.filterBounds(point)
+    spatial_filtered = landsat[year].filterBounds(point)
     landsat8_with_b5 = spatial_filtered.map(addB5)
     sorted_collection = landsat8_with_b5.sort('B5_value', False)
-    NIR_value = sorted_collection.first().getInfo()['properties']['B5_value']
+    properties = sorted_collection.first().getInfo()['properties']
     
-    NIR.append(NIR_value)
+    peak_dates.append(properties['SENSING_TIME'][:10])
+    NIR.append(properties['B5_value'])
     
     if i%20 == 0: print(i, end=' ')
-# 45.063906 seconds for BGB
 
 # checks if they are all cloud free (should equal data.shape[0])
 ids = [x for x in NIR if x]
@@ -77,6 +88,7 @@ len(ids)
 
 # update and display first 10 rows of dataframe
 data['NIR'] = NIR
+data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
