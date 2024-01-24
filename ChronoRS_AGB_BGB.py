@@ -10,7 +10,7 @@ data.head()
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
 ee.Initialize()
-landsat8_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 
 
 # add B5 band value explicitly to properties of landsat

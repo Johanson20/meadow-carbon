@@ -55,7 +55,7 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 30, lands
 
 
 # reads surface reflectance values of Tier 1 collections of landsat 8 and 7
-landsat8_collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 
