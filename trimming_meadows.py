@@ -1,7 +1,6 @@
 import os, ee
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import mapping, box
 os.chdir("Code")
 
 # ee.Authenticate()
@@ -48,4 +47,4 @@ for index, row in shapefile.iterrows():
     if index%100==0: print(index, end=" ")
     
 shapefile = None
-out_df.to_csv('False_meadows.csv', index=False)
+out_df.to_csv('False_meadows_2022.csv', index=False)
