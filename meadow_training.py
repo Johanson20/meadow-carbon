@@ -6,7 +6,7 @@ os.chdir("Code")
 # ee.Authenticate()
 ee.Initialize()
 
-shapefile = gpd.read_file("AllPossibleMeadows_2024-01-23.2.shp")
+shapefile = gpd.read_file("AllPossibleMeadows_2024-02-12.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 
