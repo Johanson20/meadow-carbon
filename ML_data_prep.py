@@ -37,3 +37,43 @@ frames = [low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, m
 
 data = pd.concat(frames)
 data.to_csv('training_and_test_data.csv', index=False)
+
+
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+from scipy.stats import randint, uniform
+
+data = pd.read_csv("training_and_test_data.csv")
+var_col = [c for c in data if c not in ['ID', 'QA_PIXEL_mean', 'QA_PIXEL_variance', 'Is_meadow']]
+X = data.loc[:, var_col]
+Y = data.loc[:, 'Is_meadow']
+
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+Y.value_counts()
+
+parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
+              'n_estimators': randint(50, 5000), 'max_depth': randint(2, 10)}
+randm = RandomizedSearchCV(estimator=GradientBoostingClassifier(), param_distributions=parameters,
+                           cv=10, n_iter=20, n_jobs=1)
+randm.fit(X_train, y_train)
+randm.best_estimator_
+randm.best_params_
+
+parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6], 
+              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
+grid = GridSearchCV(estimator=GradientBoostingClassifier(), param_grid=parameters, cv=10, n_jobs=1)
+grid.fit(X_train, y_train)
+grid.best_params_
+
+gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=7, n_estimators=2500, subsample=0.6,
+                                       validation_fraction=0.1, n_iter_no_change=20, max_features='log2',
+                                       verbose=1, random_state=48)
+gbm_model.fit(X_train, y_train)
+gbm_model.score(X_test, y_test)
+len(gbm_model.estimators_)
+
+y_train_pred = gbm_model.predict_proba(X_train)[:, 1]
+y_test_pred = gbm_model.predict_proba(X_test)[:, 1]
+print(roc_auc_score(y_train, y_train_pred))
+print(roc_auc_score(y_test, y_test_pred))
