@@ -124,12 +124,50 @@ print("Confusion Matrix:")
 print(conf_matrix)
 
 
-# read in meadow data again (same as line 6)
-df = pd.read_csv("All_meadows_2022.csv")
+# read in meadow data again without NaNs
+df = pd.read_csv("All_meadows_2022.csv").dropna()
 # drop columns without landsat data and run predictions
-X_vars = df.loc[:, var_col].dropna()
-df.shape[0] - X_vars.shape[0]   # number of dropped rows
+X_vars = df.loc[:, var_col]
 meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]
 # compute number of positively predicted meadows
 noMeadows = sum([round(value-0.17) for value in meadow_pred])
 X_vars.shape[0] - noMeadows     # number of False meadows
+
+
+# subset meadows with unclear probability vectors (0.4 - 0.65 chosen)
+obscure_data = df.loc[(meadow_pred > 0.4) & (meadow_pred < 0.65)]
+obscure_data = obscure_data.assign(Is_meadow = None)
+
+r1, r2 = max(obscure_data['B5_mean']), min(obscure_data['B5_mean'])
+step = (r1-r2)/3
+low_NIR = obscure_data[obscure_data['B5_mean'] < r2+step]
+mid_NIR = obscure_data[(obscure_data['B5_mean'] >= r2+step) & (obscure_data['B5_mean'] <= r2+2*step)]
+high_NIR = obscure_data[obscure_data['B5_mean'] > r2+2*step]
+
+random.seed(48)
+
+l1, l2 = max(low_NIR['latitude']), min(low_NIR['latitude'])
+step = (l1-l2)/3
+low_lat_low_NIR = low_NIR[low_NIR['latitude'] < l2+step].sample(n=10)
+mid_lat_low_NIR = low_NIR[(low_NIR['latitude'] >= l2+step) & (low_NIR['latitude'] <= l2+2*step)].sample(n=10)
+high_lat_low_NIR = low_NIR[low_NIR['latitude'] > l2+2*step].sample(n=10)
+
+# stratify mid NIR meadows into 3 latitude classes and draw 10 random samples each
+l1, l2 = max(mid_NIR['latitude']), min(mid_NIR['latitude'])
+step = (l1-l2)/3
+low_lat_mid_NIR = mid_NIR[mid_NIR['latitude'] < l2+step].sample(n=10)
+mid_lat_mid_NIR = mid_NIR[(mid_NIR['latitude'] >= l2+step) & (mid_NIR['latitude'] <= l2+2*step)].sample(n=10)
+high_lat_mid_NIR = mid_NIR[mid_NIR['latitude'] > l2+2*step].sample(n=10)
+
+# stratify high NIR meadows into 3 latitude classes and draw 10 random samples each
+l1, l2 = max(high_NIR['latitude']), min(high_NIR['latitude'])
+step = (l1-l2)/3
+# each draws 10 unique rows not already in "data"
+low_lat_high_NIR = high_NIR[high_NIR['latitude'] < l2+step].sample(11)
+mid_lat_high_NIR = high_NIR[(high_NIR['latitude'] >= l2+step) & (high_NIR['latitude'] <= l2+2*step)].sample (11)
+high_lat_high_NIR = high_NIR[high_NIR['latitude'] > l2+2*step].sample(11)
+
+frames = [data, low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, mid_lat_mid_NIR, 
+          high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
+newdf = pd.concat(frames).drop_duplicates(subset=['ID'])
+newdf.to_csv('new_training_and_test_data.csv', index=False)
