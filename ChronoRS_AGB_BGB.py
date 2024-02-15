@@ -32,6 +32,7 @@ for i in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     year = data.loc[i, 'SampleDate'].split("/")[2]
 
+    # filter landsat by area and year, and sort by value of added B5 band
     spatial_filtered = landsat[year].filterBounds(point)
     landsat8_with_b5 = spatial_filtered.map(addB5)
     sorted_collection = landsat8_with_b5.sort('B5_value', False)

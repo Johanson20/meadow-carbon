@@ -125,6 +125,7 @@ data = pd.read_csv("GHG_Data_Sample_Bands.csv")
 data.head()
 
 min_temp, max_temp = [], []
+# loop through and extract min and max temperatures from gridmet
 for id in range(data.shape[0]):
     x, y = data.loc[id, ['Long', 'Lat']]
     point = ee.Geometry.Point(x, y)
