@@ -177,7 +177,7 @@ newdf.to_csv('new_training_and_test_data.csv', index=False)
 
 
 
-# re-run ML for extra training data
+# re-run ML for 180 samples
 data = pd.read_csv("new_training_and_test_data.csv")
 data.head()
 # remove irrelevant columns for ML and determine X and Y variables
@@ -198,7 +198,7 @@ randm.fit(X_train, y_train)
 randm.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=7, n_estimators=2500, subsample=0.6,
+gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=3, n_estimators=500, subsample=0.5,
                                        validation_fraction=0.1, n_iter_no_change=20, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
@@ -216,3 +216,15 @@ print(roc_auc_score(y_test, y_test_pred))
 # Compare training labels and probability vectors
 for i, x in enumerate(y_test):
     print(x, y_test_pred[i])
+
+# read in meadow data again without NaNs
+df = pd.read_csv("All_meadows_2022.csv").dropna()
+# drop columns without landsat data and run predictions
+X_vars = df.loc[:, var_col]
+meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]
+df['meadow_pred'] = meadow_pred
+for threshold in [0.5, 0.6, 0.67]:
+    name = 'False_meadow_threshold_' + str(threshold) + ".csv"
+    noMeadows = df.loc[df['meadow_pred'] < threshold]
+    noMeadows.to_csv(name, index=False)
+    print("Number of False meadows at threshold =", threshold, ":", noMeadows.shape[0])
