@@ -61,7 +61,7 @@ var_col = [c for c in data if c not in ['ID', 'QA_PIXEL_mean', 'QA_PIXEL_varianc
 X = data.loc[:, var_col] # var_col are all columns in csv except above 4
 Y = data.loc[:, 'Is_meadow']
 
-# split X and Y into training (80%) and test data (80%), random state ensures reproducibility
+# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
 X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
 Y.value_counts()
 
@@ -92,6 +92,8 @@ gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=7, n_estima
 gbm_model.fit(X_train, y_train)
 gbm_model.score(X_test, y_test)  # mean accuracy (percentage/100)
 len(gbm_model.estimators_)  # number of trees used in estimation
+gbm_model.feature_importances_
+gbm_model.feature_names_in_
 
 # probability vectors on test data: "No" = [:, 0] and "Yes" = [:, 1], and roc_auc
 y_train_pred = gbm_model.predict_proba(X_train)[:, 1]
@@ -138,6 +140,7 @@ X_vars.shape[0] - noMeadows     # number of False meadows
 obscure_data = df.loc[(meadow_pred > 0.4) & (meadow_pred < 0.65)]
 obscure_data = obscure_data.assign(Is_meadow = None)
 
+# repeat stratification for sampling additional meadows
 r1, r2 = max(obscure_data['B5_mean']), min(obscure_data['B5_mean'])
 step = (r1-r2)/3
 low_NIR = obscure_data[obscure_data['B5_mean'] < r2+step]
@@ -171,3 +174,45 @@ frames = [data, low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_
           high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
 newdf = pd.concat(frames).drop_duplicates(subset=['ID'])
 newdf.to_csv('new_training_and_test_data.csv', index=False)
+
+
+
+# re-run ML for extra training data
+data = pd.read_csv("new_training_and_test_data.csv")
+data.head()
+# remove irrelevant columns for ML and determine X and Y variables
+var_col = [c for c in data if c not in ['ID', 'longitude', 'latitude', 'QA_PIXEL_mean', 'QA_PIXEL_variance', 'Is_meadow']]
+X = data.loc[:, var_col] # var_col are all columns in csv except above 4
+Y = data.loc[:, 'Is_meadow']
+
+# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+Y.value_counts()
+
+# Hyperparameter tuning with RandomizedSearchCV
+parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6], 
+              'n_estimators': [100, 200, 500, 1000, 2500, 5000], 'max_depth': [3,4,5,6]}
+randm = RandomizedSearchCV(estimator=GradientBoostingClassifier(), param_distributions=parameters,
+                           cv=10, n_iter=20, n_jobs=1)
+randm.fit(X_train, y_train)
+randm.best_params_
+
+# run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
+gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=7, n_estimators=2500, subsample=0.6,
+                                       validation_fraction=0.1, n_iter_no_change=20, max_features='log2',
+                                       verbose=1, random_state=48)
+gbm_model.fit(X_train, y_train)
+gbm_model.score(X_test, y_test)  # mean accuracy (percentage/100)
+len(gbm_model.estimators_)  # number of trees used in estimation
+gbm_model.feature_importances_
+gbm_model.feature_names_in_
+
+# probability vectors on test data: "No" = [:, 0] and "Yes" = [:, 1], and roc_auc
+y_train_pred = gbm_model.predict_proba(X_train)[:, 1]
+y_test_pred = gbm_model.predict_proba(X_test)[:, 1]
+print(roc_auc_score(y_train, y_train_pred))
+print(roc_auc_score(y_test, y_test_pred))
+
+# Compare training labels and probability vectors
+for i, x in enumerate(y_test):
+    print(x, y_test_pred[i])
