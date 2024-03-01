@@ -4,7 +4,7 @@ import geopandas as gpd
 os.chdir("Code")
 
 # Authenticate and initialize python access to Google Earth Engine
-# ee.Authenticate    # only use if you've never run this on your current computer before or loss GEE access
+# ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
