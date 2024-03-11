@@ -15,7 +15,7 @@ ee.Initialize()
 
 # Function to mask clouds
 def maskClouds(image):
-    quality = image.select('pixel_qa')
+    quality = image.select('QA_PIXEL')
     cloud = quality.bitwiseAnd(1 << 5).eq(0)    # mask out cloudy pixels
     clear = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
     return image.updateMask(cloud).updateMask(clear)
@@ -38,25 +38,25 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 30, lands
     sorted_collection = cloud_free_images.map(calculate_time_difference).sort('time_difference')
     image_list = sorted_collection.toList(sorted_collection.size())
     noImages = image_list.size().getInfo()
-    nImage, band_values = 0, {'B2': None}
+    nImage, band_values = 0, {'SR_B2': None}
     
     # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
-    while band_values['B2'] == None and nImage < noImages:
+    while band_values['SR_B2'] == None and nImage < noImages:
         nearest_image = ee.Image(image_list.get(nImage))
         nImage += 1
         if landsatNo == 7:
-            bands = nearest_image.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7'])
+            bands = nearest_image.select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'])
         else:
-            bands = nearest_image.select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7'])
+            bands = nearest_image.select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
         properties = nearest_image.getInfo()['properties']
         band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     
-    return [list(band_values.values()), properties['time_difference'], properties['SENSING_TIME']]
+    return [list(band_values.values()), properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
 
 
 # reads surface reflectance values of Tier 1 collections of landsat 8 and 7
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 
 # define arrays to store band values and landsat information
@@ -70,19 +70,19 @@ for id in range(data.shape[0]):
     target_date = data.loc[id, 'Date'].strftime('%Y-%m-%d')
     # 30 day radius used to search for cloud-free images
     vxn = 8
-    band_values, t_diff, l_epoch = getBandValues(landsat8_collection, point, target_date, 30)
+    band_values, t_diff, date_epoch, time_epoch = getBandValues(landsat8_collection, point, target_date, 30)
     if not band_values[0]:
         vxn = 7
-        band_values, t_diff, l_epoch = getBandValues(landsat7_collection, point, target_date, 30, 7)
+        band_values, t_diff, date_epoch, time_epoch = getBandValues(landsat7_collection, point, target_date, 30, 7)
         # 60 day radius used to find more cloud-free images
         if not band_values[0]:
             vxn = 8
             print(id, "Searching Landsat 8 collection with 60-day search radius")
-            band_values, t_diff, l_epoch = getBandValues(landsat8_collection, point, target_date, 60)
+            band_values, t_diff, date_epoch, time_epoch = getBandValues(landsat8_collection, point, target_date, 60)
             if not band_values[0]:
                 vxn = 7
                 print(id, "Searching Landsat 7 collection with 60-day search radius")
-                band_values, t_diff, l_epoch = getBandValues(landsat7_collection, point,
+                band_values, t_diff, date_epoch, time_epoch = getBandValues(landsat7_collection, point,
                                                                  target_date, 60, 7)
                 
     Blue.append(band_values[0])
@@ -93,8 +93,8 @@ for id in range(data.shape[0]):
     SWIR_2.append(band_values[5])
     driver.append(vxn)
     time_diff.append(t_diff)
-    acq_date.append(l_epoch.split('T')[0])
-    acq_time.append(l_epoch.split('T')[1].split('.')[0])
+    acq_date.append(date_epoch)
+    acq_time.append(time_epoch.split('.')[0])
     
     if id%100 == 0: print(id, end=' ')
 
