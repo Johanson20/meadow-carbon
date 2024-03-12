@@ -102,3 +102,50 @@ data.head()
 
 # write updated dataframe to new csv file
 data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
+
+
+# ML training starts here
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score, mean_squared_error
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from scipy.stats import randint, uniform
+import numpy as np
+
+# read csv containing random samples
+data = pd.read_csv("Belowground Biomass_RS Model_Data.csv")
+# data = pd.read_csv("Aboveground Biomass_RS Model_Data.csv")
+data.head()
+cols = data.columns
+# remove irrelevant columns for ML and determine X and Y variables
+var_col = [c for c in cols[6:] if c not in ['percentC', '...1', 'peak_date']]
+# var_col = [c for c in cols[5:] if c != 'peak_date']
+X = data.loc[:, var_col[3:]]
+# X = data.loc[:, var_col[2:]]
+Y = data.loc[:, 'Roots.kg.m2']
+# Y = data.loc[:, 'HerbBio.g.m2']
+sum(X['Blue'].isna())  # check for missing/null values
+sum(X.isnull().any(axis=1) == True)   # set axis=0 for missing column values (1 for rows)
+
+# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+
+''' Before using gradient boosting, optimize hyperparameters either:
+    by randomnly selecting from a range of values using RandomizedSearchCV,
+    or by grid search which searches through all provided possibilities with GridSearchCV
+'''
+# optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
+parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
+              'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
+randm = RandomizedSearchCV(estimator=GradientBoostingClassifier(), param_distributions=parameters,
+                           cv=10, n_iter=50, n_jobs=1)
+randm.fit(X_train, y_train)
+randm.best_estimator_
+randm.best_params_      # outputs all parameters of ideal estimator
+
+# same process above but with GridSearchCV for comparison (takes even longer)
+parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6], 
+              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
+grid = GridSearchCV(estimator=GradientBoostingClassifier(), param_grid=parameters, cv=10, n_jobs=1)
+grid.fit(X_train, y_train)
+grid.best_params_
