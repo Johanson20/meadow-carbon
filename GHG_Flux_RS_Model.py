@@ -149,22 +149,36 @@ data.to_csv('GHG_Flux_RS_Model_Data.csv', index=False)
 
 # ML training starts here
 from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import roc_auc_score, mean_squared_error
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
+import matplotlib.pyplot as plt
 from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("GHG_Flux_RS_Model_Data.csv")
 data.head()
+data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
+data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
+data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
+data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
+data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 cols = data.columns
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols[6:] if c not in ['Driver', 'Days_of_data_acquisition_offset']]
 X = data.loc[:, var_col[3:]]
-Y = data.loc[:, 'CO2.umol.m2.s']
-sum(X['Blue'].isna())  # check for missing/null values
-sum(X.isnull().any(axis=1) == True)   # set axis=0 for missing column values (1 for rows)
+y_field = 'CO2.umol.m2.s'
+Y = data.loc[:, y_field]
+
+# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+sum(X.isnull().any(axis=0) == True)
+sum(X.isnull().any(axis=1) == True)
+sum(Y.isnull())
+
+# if NAs where found (results above are not 0) in one of them (e.g. Y)
+nullIds =  list(np.where(Y.isnull())[0])    # null IDs
+X.drop(nullIds, inplace = True)
+Y.drop(nullIds, inplace = True)
 
 # split X and Y into training (80%) and test data (20%), random state ensures reproducibility
 X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
@@ -176,55 +190,47 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 # optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
-randm = RandomizedSearchCV(estimator=GradientBoostingClassifier(), param_distributions=parameters,
-                           cv=10, n_iter=50, n_jobs=1)
+randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
+                           cv=5, n_iter=20, scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
-randm.best_estimator_
 randm.best_params_      # outputs all parameters of ideal estimator
 
 # same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6], 
-              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingClassifier(), param_grid=parameters, cv=10, n_jobs=1)
+parameters = {'learning_rate': [0.03], 'subsample': [0.5, 0.6], 
+              'n_estimators': [2500], 'max_depth': [4,5,6,7,8,9]}
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
 grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-gbm_model = GradientBoostingClassifier(learning_rate=0.01, max_depth=7, n_estimators=2500, subsample=0.6,
-                                       validation_fraction=0.1, n_iter_no_change=20, max_features='log2',
+gbm_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=6, n_estimators=2500, subsample=0.6,
+                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
-gbm_model.score(X_test, y_test)  # mean accuracy (percentage/100)
 len(gbm_model.estimators_)  # number of trees used in estimation
-gbm_model.feature_importances_
-gbm_model.feature_names_in_
 
-# probability vectors on test data: "No" = [:, 0] and "Yes" = [:, 1], and roc_auc
-y_train_pred = gbm_model.predict_proba(X_train)[:, 1]
-y_test_pred = gbm_model.predict_proba(X_test)[:, 1]
-print(roc_auc_score(y_train, y_train_pred))
-print(roc_auc_score(y_test, y_test_pred))
+# print relevant stats
+y_train_pred = gbm_model.predict(X_train)
+y_test_pred = gbm_model.predict(X_test)
+mae = mean_absolute_error(y_test, y_test_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+mape = mean_absolute_percentage_error(y_test, y_test_pred)
+correlation = np.corrcoef(y_test, y_test_pred)
+print("Root Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(rmse, mae))
+print("Mean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R):\n{}".format(mape, correlation))
 
-# Compare training labels and probability vectors
-for i, x in enumerate(y_train):
-    print(x, y_train_pred[i])
+# plot Feature importance
+feat_imp = gbm_model.feature_importances_
+sorted_idx = np.argsort(feat_imp)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
+def plotFeatureImportance():
+    plt.barh(pos, feat_imp[sorted_idx], align="center")
+    plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
+    plt.title("Feature Importance")
+plotFeatureImportance()
 
-# assign 1 to "Yes" and "No" to 0 (most "Yes" have prob > 0.67 in training) on test data
-y_pred = [1 if x=="Yes" else 0 for x in y_test]
-predictions = [round(value-0.17) for value in y_test_pred]  # assuming 0.67 is meadow threshold
-
-# compute accuracy and rmse manually (not reliable)
-accuracy = sum([1 if y_pred[i]==predictions[i] else 0 for i in range(len(y_pred))])/len(y_pred)*100
-rmse = np.sqrt(mean_squared_error(predictions, y_pred))
-
-# compute confusion matrix related metrics
-precision = precision_score(y_pred, predictions, pos_label=1)
-recall = recall_score(y_pred, predictions, pos_label=1)
-f1 = f1_score(y_pred, predictions, pos_label=1)
-conf_matrix = confusion_matrix(y_pred, predictions, labels=[1, 0])
-
-print("Precision:", precision)
-print("Recall:", recall)
-print("F1 Score:", f1)
-print("Confusion Matrix:")
-print(conf_matrix)
+def plotY():
+    plt.scatter(y_test, y_test_pred, color='g')
+    plt.xlabel('Actual ' + y_field)
+    plt.ylabel("Predicted " + y_field)
+plotY()

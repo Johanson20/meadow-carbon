@@ -106,26 +106,37 @@ data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
 
 # ML training starts here
 from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import roc_auc_score, mean_squared_error
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
+import matplotlib.pyplot as plt
 from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("Belowground Biomass_RS Model_Data.csv")
-# data = pd.read_csv("Aboveground Biomass_RS Model_Data.csv")
 data.head()
+data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
+data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
+data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
+data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
+data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 cols = data.columns
+
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols[6:] if c not in ['percentC', '...1', 'peak_date']]
-# var_col = [c for c in cols[5:] if c != 'peak_date']
 X = data.loc[:, var_col[3:]]
-# X = data.loc[:, var_col[2:]]
-Y = data.loc[:, 'Roots.kg.m2']
-# Y = data.loc[:, 'HerbBio.g.m2']
-sum(X['Blue'].isna())  # check for missing/null values
-sum(X.isnull().any(axis=1) == True)   # set axis=0 for missing column values (1 for rows)
+y_field = 'Roots.kg.m2'
+Y = data.loc[:, y_field]
+
+# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+sum(X.isnull().any(axis=0) == True)
+sum(X.isnull().any(axis=1) == True)
+sum(Y.isnull())
+
+# if NAs where found (results are not 0) in one of them (e.g. Y)
+nullIds =  list(np.where(Y.isnull())[0])    # null IDs
+X.drop(nullIds, inplace = True)
+Y.drop(nullIds, inplace = True)
 
 # split X and Y into training (80%) and test data (20%), random state ensures reproducibility
 X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
@@ -137,15 +148,128 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 # optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
-randm = RandomizedSearchCV(estimator=GradientBoostingClassifier(), param_distributions=parameters,
-                           cv=10, n_iter=50, n_jobs=1)
+randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
+                           cv=5, n_iter=50,  scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
-randm.best_estimator_
 randm.best_params_      # outputs all parameters of ideal estimator
 
 # same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6], 
+parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6, 0.7], 
               'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingClassifier(), param_grid=parameters, cv=10, n_jobs=1)
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=10, scoring='neg_mean_squared_error')
 grid.fit(X_train, y_train)
 grid.best_params_
+
+gbm_model = GradientBoostingRegressor(learning_rate=0.006, max_depth=6, n_estimators=4774, subsample=0.52,
+                                       validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
+                                       verbose=1, random_state=48)
+gbm_model.fit(X_train, y_train)
+len(gbm_model.estimators_)  # number of trees used in estimation
+
+# print relevant stats
+y_train_pred = gbm_model.predict(X_train)
+y_test_pred = gbm_model.predict(X_test)
+mae = mean_absolute_error(y_test, y_test_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+mape = mean_absolute_percentage_error(y_test, y_test_pred)
+correlation = np.corrcoef(y_test, y_test_pred)
+print("Root Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(rmse, mae))
+print("Mean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R):\n{}".format(mape, correlation))
+
+# plot Feature importance
+feat_imp = gbm_model.feature_importances_
+sorted_idx = np.argsort(feat_imp)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
+def plotFeatureImportance():
+    plt.barh(pos, feat_imp[sorted_idx], align="center")
+    plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
+    plt.title("Feature Importance")
+plotFeatureImportance()
+
+def plotY():
+    plt.scatter(y_test, y_test_pred, color='g')
+    plt.xlabel('Actual ' + y_field)
+    plt.ylabel("Predicted " + y_field)
+plotY()
+
+
+
+# same procedure as above
+data = pd.read_csv("Aboveground Biomass_RS Model_Data.csv")
+data.head()
+data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
+data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
+data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
+data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
+data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
+cols = data.columns
+
+# remove irrelevant columns for ML and determine X and Y variables
+var_col = [c for c in cols[5:] if c != 'peak_date']
+X = data.loc[:, var_col[2:]]
+y_field = 'HerbBio.g.m2'
+Y = data.loc[:, y_field]
+
+# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+sum(X.isnull().any(axis=0) == True)
+sum(X.isnull().any(axis=1) == True)
+sum(Y.isnull())
+
+# if NAs where found (results are not 0) in one of them (e.g. Y)
+nullIds =  list(np.where(Y.isnull())[0])    # null IDs
+X.drop(nullIds, inplace = True)
+Y.drop(nullIds, inplace = True)
+
+# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+
+''' Before using gradient boosting, optimize hyperparameters either:
+    by randomnly selecting from a range of values using RandomizedSearchCV,
+    or by grid search which searches through all provided possibilities with GridSearchCV
+'''
+# optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
+parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
+              'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
+randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
+                           cv=5, n_iter=50, scoring='neg_mean_squared_error')
+randm.fit(X_train, y_train)
+randm.best_params_      # outputs all parameters of ideal estimator
+
+# same process above but with GridSearchCV for comparison (takes even longer)
+parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6, 0.7], 
+              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=10, scoring='neg_mean_squared_error')
+grid.fit(X_train, y_train)
+grid.best_params_
+
+gbm_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=6, n_estimators=4774, subsample=0.52,
+                                       validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
+                                       verbose=1, random_state=48)
+gbm_model.fit(X_train, y_train)
+len(gbm_model.estimators_)  # number of trees used in estimation
+
+# print relevant stats
+y_train_pred = gbm_model.predict(X_train)
+y_test_pred = gbm_model.predict(X_test)
+mae = mean_absolute_error(y_test, y_test_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+mape = mean_absolute_percentage_error(y_test, y_test_pred)
+correlation = np.corrcoef(y_test, y_test_pred)
+print("Root Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(rmse, mae))
+print("Mean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R):\n{}".format(mape, correlation))
+
+# plot Feature importance
+feat_imp = gbm_model.feature_importances_
+sorted_idx = np.argsort(feat_imp)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
+def plotFeatureImportance():
+    plt.barh(pos, feat_imp[sorted_idx], align="center")
+    plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
+    plt.title("Feature Importance")
+plotFeatureImportance()
+
+def plotY():
+    plt.scatter(y_test, y_test_pred, color='g')
+    plt.xlabel('Actual ' + y_field)
+    plt.ylabel("Predicted " + y_field)
+plotY()
