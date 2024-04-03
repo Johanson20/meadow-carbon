@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: Johanson C. Onyegbula
+"""
+
+
 import os
 import ee
 import pandas as pd
@@ -149,7 +155,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
 randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=50,  scoring='neg_mean_squared_error')
+                           cv=5, n_iter=20,  scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
@@ -160,7 +166,7 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.006, max_depth=6, n_estimators=4774, subsample=0.52,
+gbm_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=8, n_estimators=2359, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
@@ -231,7 +237,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
 randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=50, scoring='neg_mean_squared_error')
+                           cv=5, n_iter=20, scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
@@ -242,7 +248,7 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=6, n_estimators=4774, subsample=0.52,
+gbm_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=5, n_estimators=1184, subsample=0.6,
                                        validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)

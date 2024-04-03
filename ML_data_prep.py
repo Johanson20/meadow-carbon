@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: Johanson C. Onyegbula
+"""
+
+
 import os, random
 import pandas as pd
 os.chdir("Code")    # change path to where csv is stored

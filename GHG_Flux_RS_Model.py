@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: Johanson C. Onyegbula
+"""
+
+
 import os
 import ee
 import pandas as pd
@@ -191,14 +197,14 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
 randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=20, scoring='neg_mean_squared_error')
+                           cv=5, n_iter=20)
 randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
 # same process above but with GridSearchCV for comparison (takes even longer)
 parameters = {'learning_rate': [0.03], 'subsample': [0.5, 0.6], 
               'n_estimators': [2500], 'max_depth': [4,5,6,7,8,9]}
-grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5)
 grid.fit(X_train, y_train)
 grid.best_params_
 

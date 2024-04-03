@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+@author: Johanson C. Onyegbula
+"""
+
+
 import os, ee
 import pandas as pd
 import geopandas as gpd
