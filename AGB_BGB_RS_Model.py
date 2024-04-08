@@ -117,6 +117,7 @@ from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error,
 import matplotlib.pyplot as plt
 from scipy.stats import randint, uniform
 import numpy as np
+import math
 
 # read csv containing random samples
 data = pd.read_csv("Belowground Biomass_RS Model_Data.csv")
@@ -175,12 +176,25 @@ len(gbm_model.estimators_)  # number of trees used in estimation
 # print relevant stats
 y_train_pred = gbm_model.predict(X_train)
 y_test_pred = gbm_model.predict(X_test)
-mae = mean_absolute_error(y_test, y_test_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-mape = mean_absolute_percentage_error(y_test, y_test_pred)
-correlation = np.corrcoef(y_test, y_test_pred)
-print("Root Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(rmse, mae))
-print("Mean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R):\n{}".format(mape, correlation))
+train_mae = mean_absolute_error(y_train, y_train_pred)
+train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
+val = (y_train_pred - y_train) / y_train
+train_p_bias = np.mean(val[np.isfinite(val)]) * 100
+
+train_corr = np.corrcoef(y_train, y_train_pred)
+test_mae = mean_absolute_error(y_test, y_test_pred)
+test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
+test_corr = np.corrcoef(y_test, y_test_pred)
+val = (y_test_pred - y_test) / y_test
+test_p_bias = np.mean(val[np.isfinite(val)]) * 100
+
+print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = gbm_model.feature_importances_
@@ -196,6 +210,9 @@ def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
+    axes_lim = math.ceil(max(max(y_test), max(y_test_pred))) + 2
+    plt.xlim((0, axes_lim))
+    plt.ylim((0, axes_lim))
 plotY()
 
 
@@ -237,7 +254,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_
 parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
               'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
 randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=20, scoring='neg_mean_squared_error')
+                           cv=5, n_iter=50, scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
@@ -248,21 +265,32 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=5, n_estimators=1184, subsample=0.6,
-                                       validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
-                                       verbose=1, random_state=48)
+gbm_model = GradientBoostingRegressor(verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
 len(gbm_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = gbm_model.predict(X_train)
 y_test_pred = gbm_model.predict(X_test)
-mae = mean_absolute_error(y_test, y_test_pred)
-rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-mape = mean_absolute_percentage_error(y_test, y_test_pred)
-correlation = np.corrcoef(y_test, y_test_pred)
-print("Root Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(rmse, mae))
-print("Mean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R):\n{}".format(mape, correlation))
+train_mae = mean_absolute_error(y_train, y_train_pred)
+train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
+val = (y_train_pred - y_train) / y_train
+train_p_bias = np.mean(val[np.isfinite(val)]) * 100
+
+train_corr = np.corrcoef(y_train, y_train_pred)
+test_mae = mean_absolute_error(y_test, y_test_pred)
+test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
+test_corr = np.corrcoef(y_test, y_test_pred)
+val = (y_test_pred - y_test) / y_test
+test_p_bias = np.mean(val[np.isfinite(val)]) * 100
+
+print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = gbm_model.feature_importances_
@@ -278,4 +306,7 @@ def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
+    axes_lim = math.ceil(max(max(y_test), max(y_test_pred))) + 2
+    plt.xlim((0, axes_lim))
+    plt.ylim((0, axes_lim))
 plotY()
