@@ -163,7 +163,7 @@ randm.best_params_      # outputs all parameters of ideal estimator
 # same process above but with GridSearchCV for comparison (takes even longer)
 parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6, 0.7], 
               'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=10, scoring='neg_mean_squared_error')
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
 grid.fit(X_train, y_train)
 grid.best_params_
 
@@ -176,24 +176,25 @@ len(gbm_model.estimators_)  # number of trees used in estimation
 # print relevant stats
 y_train_pred = gbm_model.predict(X_train)
 y_test_pred = gbm_model.predict(X_test)
+
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-
 train_corr = np.corrcoef(y_train, y_train_pred)
+
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
 test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
-test_p_bias = np.mean(val[np.isfinite(val)]) * 100
+test_p_bias = sum(val[np.isfinite(val)]) * 100
 
 print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
 print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
@@ -259,26 +260,29 @@ randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
 # same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6, 0.7], 
-              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=10, scoring='neg_mean_squared_error')
+parameters = {'learning_rate': [0.001, 0.003, 0.007, 0.01, 0.02, 0.03], 'subsample': [0.4, 0.5, 0.6, 0.7], 
+              'n_estimators': [100, 250, 500, 750, 1000, 2500, 4000], 'max_depth': [3,4,5,6,7,8]}
+grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(verbose=1, random_state=48)
+gbm_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=6, n_estimators=1000, subsample=0.4,
+                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+                                       verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
 len(gbm_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = gbm_model.predict(X_train)
 y_test_pred = gbm_model.predict(X_test)
+
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-
 train_corr = np.corrcoef(y_train, y_train_pred)
+
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
 test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
@@ -289,7 +293,7 @@ test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
 print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance

@@ -218,13 +218,14 @@ len(gbm_model.estimators_)  # number of trees used in estimation
 # print relevant stats
 y_train_pred = gbm_model.predict(X_train)
 y_test_pred = gbm_model.predict(X_test)
+
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-
 train_corr = np.corrcoef(y_train, y_train_pred)
+
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
 test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
@@ -235,7 +236,7 @@ test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
 print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
