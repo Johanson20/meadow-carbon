@@ -111,13 +111,13 @@ data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
 
 
 # ML training starts here
-from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import GroupShuffleSplit, GridSearchCV, RandomizedSearchCV
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 import matplotlib.pyplot as plt
 from scipy.stats import randint, uniform
 import numpy as np
-import math
 
 # read csv containing random samples
 data = pd.read_csv("Belowground Biomass_RS Model_Data.csv")
@@ -127,26 +127,34 @@ data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
-cols = data.columns
+cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+data = data.loc[:, cols]
+data.drop_duplicates(inplace=True)  # remove duplicate rows
+data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[6:] if c not in ['percentC', '...1', 'peak_date']]
-X = data.loc[:, var_col[3:]]
+var_col = [c for c in cols[5:] if c not in ['percentC', '...1', 'peak_date']]
 y_field = 'Roots.kg.m2'
-Y = data.loc[:, y_field]
+# subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
+subdata = data.loc[:, ([y_field] + var_col[3:])]
 
 # check for missing/null values across columns and rows respectively (confirm results below should be all 0)
-sum(X.isnull().any(axis=0) == True)
-sum(X.isnull().any(axis=1) == True)
-sum(Y.isnull())
+sum(subdata.isnull().any(axis=0) == True)
+sum(subdata[y_field].isnull())
 
-# if NAs where found (results are not 0) in one of them (e.g. Y)
-nullIds =  list(np.where(Y.isnull())[0])    # null IDs
-X.drop(nullIds, inplace = True)
-Y.drop(nullIds, inplace = True)
+# if NAs where found (results above are not 0) in one of them (e.g. Y)
+nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
+data.drop(nullIds, inplace = True)
 
-# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
-X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
+split = gsp.split(data, groups=data['ID'])
+train_index, test_index = next(split)
+train_data = data.iloc[train_index]
+test_data = data.iloc[test_index]
+
+X_train, y_train = train_data.loc[:, var_col[3:]], train_data[y_field]
+X_test, y_test = test_data.loc[:, var_col[3:]], test_data[y_field]
 
 ''' Before using gradient boosting, optimize hyperparameters either:
     by randomnly selecting from a range of values using RandomizedSearchCV,
@@ -167,8 +175,8 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=8, n_estimators=2359, subsample=0.9,
-                                       validation_fraction=0.2, n_iter_no_change=20, max_features='log2',
+gbm_model = GradientBoostingRegressor(learning_rate=0.28, max_depth=9, n_estimators=100, subsample=0.3,
+                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
 len(gbm_model.estimators_)  # number of trees used in estimation
@@ -179,28 +187,35 @@ y_test_pred = gbm_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
 train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = sum(val[np.isfinite(val)]) * 100
 
-print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
 print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = gbm_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# Make regression line over y_test and it's predictions
+regressor = LinearRegression()
+y_test = np.array(y_test).reshape(-1,1)
+y_test_pred = np.array(y_test_pred).reshape(-1,1)
+regressor.fit(y_test, y_test_pred)
+y_pred = regressor.predict(y_test)
+
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
@@ -209,11 +224,16 @@ plotFeatureImportance()
 
 def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
+    plt.plot(y_test, y_pred, color='k', label='Regression line')
+    plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    axes_lim = math.ceil(max(max(y_test), max(y_test_pred))) + 2
+    plt.title("Test set (y_test) predictions")
+    # Make axes of equal extents
+    axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
+    plt.legend()
 plotY()
 
 
@@ -226,26 +246,34 @@ data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
-cols = data.columns
+cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+data = data.loc[:, cols]
+data.drop_duplicates(inplace=True)  # remove duplicate rows
+data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[5:] if c != 'peak_date']
-X = data.loc[:, var_col[2:]]
+var_col = [c for c in cols[4:] if c != 'peak_date']
 y_field = 'HerbBio.g.m2'
-Y = data.loc[:, y_field]
+# subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
+subdata = data.loc[:, ([y_field] + var_col[2:])]
 
 # check for missing/null values across columns and rows respectively (confirm results below should be all 0)
-sum(X.isnull().any(axis=0) == True)
-sum(X.isnull().any(axis=1) == True)
-sum(Y.isnull())
+sum(subdata.isnull().any(axis=0) == True)
+sum(subdata[y_field].isnull())
 
-# if NAs where found (results are not 0) in one of them (e.g. Y)
-nullIds =  list(np.where(Y.isnull())[0])    # null IDs
-X.drop(nullIds, inplace = True)
-Y.drop(nullIds, inplace = True)
+# if NAs where found (results above are not 0) in one of them (e.g. Y)
+nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
+data.drop(nullIds, inplace = True)
 
-# split X and Y into training (80%) and test data (20%), random state ensures reproducibility
-X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=10)
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
+split = gsp.split(data, groups=data['ID'])
+train_index, test_index = next(split)
+train_data = data.iloc[train_index]
+test_data = data.iloc[test_index]
+
+X_train, y_train = train_data.loc[:, var_col[2:]], train_data[y_field]
+X_test, y_test = test_data.loc[:, var_col[2:]], test_data[y_field]
 
 ''' Before using gradient boosting, optimize hyperparameters either:
     by randomnly selecting from a range of values using RandomizedSearchCV,
@@ -266,7 +294,7 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=6, n_estimators=1000, subsample=0.4,
+gbm_model = GradientBoostingRegressor(learning_rate=0.29, max_depth=6, n_estimators=125, subsample=0.95,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 gbm_model.fit(X_train, y_train)
@@ -278,28 +306,35 @@ y_test_pred = gbm_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train, y_train_pred)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
 train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test, y_test_pred)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
-print("TRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
 print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = gbm_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# Make regression line over y_test and it's predictions
+regressor = LinearRegression()
+y_test = np.array(y_test).reshape(-1,1)
+y_test_pred = np.array(y_test_pred).reshape(-1,1)
+regressor.fit(y_test, y_test_pred)
+y_pred = regressor.predict(y_test)
+
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
@@ -308,9 +343,29 @@ plotFeatureImportance()
 
 def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
+    plt.plot(y_test, y_pred, color='k', label='Regression line')
+    plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    axes_lim = math.ceil(max(max(y_test), max(y_test_pred))) + 2
+    plt.title("Test set (y_test) predictions")
+    # Make axes of equal extents
+    axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
+    plt.legend()
 plotY()
+
+
+
+'''
+# GHG Results:
+{'RMSE': [1.35099, 0.003, 1500, 0.9, 10, 0.1],
+ 'BIAS': [22.56739, 0.05, 500, 0.8, 10, 0.2]}
+
+# BGB Results:
+{'RMSE': [1.3487, 0.25, 75, 0.6, 5, 0.2],
+ 'BIAS': [3.36418, 0.28, 100, 0.3, 9, 0.2]}
+
+# AGB Results:
+{'RMSE': [92.31518, 0.29, 125, 0.95, 6, 0.2],
+ 'BIAS': [0.01486, 0.33, 75, 0.4, 13, 0.2]}'''

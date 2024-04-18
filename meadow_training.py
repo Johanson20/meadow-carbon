@@ -21,9 +21,9 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 # Function to mask clouds
 def maskClouds(image):
     quality = image.select('QA_PIXEL')
-    cloud = quality.bitwiseAnd(1 << 5).eq(0)    # mask out cloudy pixels
-    clear = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
-    return image.updateMask(cloud).updateMask(clear)
+    cloud = quality.bitwiseAnd(1 << 3).eq(0)    # mask out cloudy pixels
+    cloudShadow = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
+    return image.updateMask(cloud).updateMask(cloudShadow)
 
 # initialize dataframe with relevant variables
 df = pd.DataFrame(columns=['ID', 'longitude', 'latitude', 'flow_accumulation', 'QA_PIXEL_mean', 'QA_PIXEL_variance',
