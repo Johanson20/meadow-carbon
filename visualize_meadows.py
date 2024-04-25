@@ -21,7 +21,7 @@ import ipywidgets as widgets
 ids = shapefile.ID
 
 def zoom_level(area):
-    ''' zoom_level ranges from 10 (largest) to 19 (smallest of 0.0007 km2) for all polygons
+    ''' zoom_level ranges from 10 (largest of 369.83082 km2) to 19 (smallest of 0.0007 km2) for all polygons
      Each zoom-out approximately quadruples the area viewed (hence log 2)
      calculate deviation or zoom-out extent from 19'''
     tradeoff = math.log2(area/0.0007)

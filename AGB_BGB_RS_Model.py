@@ -175,10 +175,10 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.28, max_depth=9, n_estimators=100, subsample=0.3,
+bgb_model = GradientBoostingRegressor(learning_rate=0.28, max_depth=9, n_estimators=100, subsample=0.3,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
-gbm_model.fit(X_train, y_train)
+bgb_model.fit(X_train, y_train)
 len(gbm_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
@@ -294,10 +294,10 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
-gbm_model = GradientBoostingRegressor(learning_rate=0.29, max_depth=6, n_estimators=125, subsample=0.95,
+agb_model = GradientBoostingRegressor(learning_rate=0.29, max_depth=6, n_estimators=125, subsample=0.95,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
-gbm_model.fit(X_train, y_train)
+agb_model.fit(X_train, y_train)
 len(gbm_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
