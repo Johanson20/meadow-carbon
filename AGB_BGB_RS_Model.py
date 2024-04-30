@@ -4,8 +4,7 @@
 """
 
 
-import os
-import ee
+import os, ee, pickle
 import pandas as pd
 os.chdir("Code")    # adjust directory
 
@@ -355,6 +354,10 @@ def plotY():
     plt.legend()
 plotY()
 
+
+f = open('models.pckl', 'wb')
+pickle.dump([ghg_model, agb_model, bgb_model], f)
+f.close()
 
 
 '''
