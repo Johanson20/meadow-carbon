@@ -10,6 +10,9 @@ import warnings
 import pandas as pd
 import geopandas as gpd
 from datetime import datetime, timedelta
+from geocube.api.core import make_geocube
+from pyproj import Proj, transform
+
 os.chdir("Code")
 warnings.filterwarnings("ignore")
 
@@ -40,12 +43,12 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 5    # 9313 (crosses), 17902 (largest), 16658 (smallest)
-feature = shapefile.loc[meadowId, 'geometry']
-if feature.geom_type == 'Polygon':
-    shapefile_bbox = ee.Geometry.Polygon(list(feature.exterior.coords)).buffer(-5)
-elif feature.geom_type == 'MultiPolygon':
-    shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geoms)).buffer(-5)
+meadowId = 5    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+feature = shapefile.loc[meadowId, ]
+if feature.geometry.geom_type == 'Polygon':
+    shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
+elif feature.geometry.geom_type == 'MultiPolygon':
+    shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-5)
 
 # convert landsat image collection over each meadow to list for iteration
 landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskImage)
@@ -61,18 +64,19 @@ slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
 cols = ['Pixel', 'Date', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
         'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
-flow_values = None
+flow_values, latlon = None, None
 
 # iterate through each landsat image
 for idx in range(noImages):
     # extract pixel coordinates and band values from landsat
     landsat_image = ee.Image(image_list.get(idx))
-    latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
-    if not latlon:
-        continue
-    lat = [feat['geometry']['coordinates'][1] for feat in latlon]
-    lon = [feat['geometry']['coordinates'][0] for feat in latlon]
-    band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
+    if not latlon:      # only extract pixel coordinates once as value is constant for the same meadow
+        latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
+        if not latlon:      # if no coordinate found, skip iteration (probably cloud/snow cover)
+            continue
+        lat = [feat['geometry']['coordinates'][1] for feat in latlon]
+        lon = [feat['geometry']['coordinates'][0] for feat in latlon]
+        band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
     
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
@@ -84,7 +88,7 @@ for idx in range(noImages):
     min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
     max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
     
-    if not flow_values:
+    if not flow_values:     # only extract once for the same meadow
         flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
         dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
         slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
@@ -96,7 +100,7 @@ for idx in range(noImages):
     df = pd.DataFrame(columns=cols[:-3])
     n = len(flow_values)
     
-    if n != len(latlon):
+    if n != len(latlon):    # usually less coordinates than flow value is due to cloud/snow mask
         continue
     
     df['Date'] = [date]*n
@@ -129,3 +133,17 @@ for idx in range(noImages):
 
 # predict on dataframe
 all_data.head()
+
+# convert to projected coordinates so that resolution would be meaningful
+lats = all_data['Latitude'].values
+lons = all_data['Longitude'].values
+utm_lons, utm_lats = transform(Proj('EPSG:4326'), Proj('EPSG:32610'), lats, lons)
+res = 30
+out_raster = "Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
+
+# make geodataframe of relevant columns and crs of projected coordinates
+gdf = gpd.GeoDataFrame(all_data.iloc[:, 2:], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=32610)
+gdf.plot()
+# make a grid (to be converted to a geotiff) where each column is a band (exclude geometry column)
+out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
+out_grd.rio.to_raster(out_raster)
