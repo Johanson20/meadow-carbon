@@ -64,7 +64,7 @@ slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
 cols = ['Pixel', 'Date', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
         'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
-flow_values, latlon = None, None
+flow_values, latlon, lat = None, None, None
 
 # iterate through each landsat image
 for idx in range(noImages):
@@ -72,11 +72,10 @@ for idx in range(noImages):
     landsat_image = ee.Image(image_list.get(idx))
     if not latlon:      # only extract pixel coordinates once as value is constant for the same meadow
         latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
-        if not latlon:      # if no coordinate found, skip iteration (probably cloud/snow cover)
-            continue
-        lat = [feat['geometry']['coordinates'][1] for feat in latlon]
-        lon = [feat['geometry']['coordinates'][0] for feat in latlon]
-        band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
+        if not lat:      # if no coordinate found, skip iteration (probably cloud/snow cover)
+            lat = [feat['geometry']['coordinates'][1] for feat in latlon]
+            lon = [feat['geometry']['coordinates'][0] for feat in latlon]
+    band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
     
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
@@ -100,13 +99,11 @@ for idx in range(noImages):
     df = pd.DataFrame(columns=cols[:-3])
     n = len(flow_values)
     
-    if n != len(latlon):    # usually less coordinates than flow value is due to cloud/snow mask
+    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
         continue
-    
+    print(idx, end=' ')
     df['Date'] = [date]*n
     df['Pixel'] = list(range(1, n+1))
-    df['Longitude'] = lon
-    df['Latitude'] = lat
     df['Blue'] = band_values['SR_B2']
     df['Green'] = band_values['SR_B3']
     df['Red'] = band_values['SR_B4']
@@ -132,18 +129,21 @@ for idx in range(noImages):
     all_data = pd.concat([all_data, df])
 
 # predict on dataframe
-all_data.head()
-
-# convert to projected coordinates so that resolution would be meaningful
-lats = all_data['Latitude'].values
-lons = all_data['Longitude'].values
-utm_lons, utm_lats = transform(Proj('EPSG:4326'), Proj('EPSG:32610'), lats, lons)
-res = 30
-out_raster = "Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
-
-# make geodataframe of relevant columns and crs of projected coordinates
-gdf = gpd.GeoDataFrame(all_data.iloc[:, 2:], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=32610)
-gdf.plot()
-# make a grid (to be converted to a geotiff) where each column is a band (exclude geometry column)
-out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
-out_grd.rio.to_raster(out_raster)
+if not all_data.empty:
+    all_data['Longitude'] = lon*(all_data.shape[0]//df.shape[0])
+    all_data['Latitude'] = lat*(all_data.shape[0]//df.shape[0])
+    all_data.head()
+    
+    # convert to projected coordinates so that resolution would be meaningful
+    lats = all_data['Latitude'].values
+    lons = all_data['Longitude'].values
+    utm_lons, utm_lats = transform(Proj('EPSG:4326'), Proj('EPSG:32610'), lats, lons)
+    res = 30
+    out_raster = "Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
+    
+    # make geodataframe of relevant columns and crs of projected coordinates
+    gdf = gpd.GeoDataFrame(all_data.iloc[:, 2:], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=32610)
+    gdf.plot()
+    # make a grid (to be converted to a geotiff) where each column is a band (exclude geometry column)
+    out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
+    out_grd.rio.to_raster(out_raster)
