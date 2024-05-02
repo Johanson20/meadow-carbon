@@ -64,18 +64,32 @@ slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
 cols = ['Pixel', 'Date', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
         'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
-flow_values, latlon, lat = None, None, None
+flow_values, latlon, lat = [], None, []
 
 # iterate through each landsat image
 for idx in range(noImages):
     # extract pixel coordinates and band values from landsat
     landsat_image = ee.Image(image_list.get(idx))
-    if not latlon:      # only extract pixel coordinates once as value is constant for the same meadow
+    
+    if not flow_values:     # only extract once for the same meadow
+        flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
+        elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['elevation']
+        slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['slope']
+        n = len(flow_values)
+    
+    if not latlon or len(lat) != n:      # only extract pixel coordinates once as value is constant for the same meadow
         latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
-        if not lat:      # if no coordinate found, skip iteration (probably cloud/snow cover)
+        if not lat or len(lat) != n:      # if no coordinate found, skip iteration (probably cloud/snow cover)
             lat = [feat['geometry']['coordinates'][1] for feat in latlon]
             lon = [feat['geometry']['coordinates'][0] for feat in latlon]
     band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
+    
+    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
+        continue
+    print(idx, end=' ')
     
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
@@ -87,21 +101,8 @@ for idx in range(noImages):
     min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
     max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
     
-    if not flow_values:     # only extract once for the same meadow
-        flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
-        elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['elevation']
-        slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['slope']
-
     # temporary dataframe for each iteration to be appended to the overall dataframe
     df = pd.DataFrame(columns=cols[:-3])
-    n = len(flow_values)
-    
-    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
-        continue
-    print(idx, end=' ')
     df['Date'] = [date]*n
     df['Pixel'] = list(range(1, n+1))
     df['Blue'] = band_values['SR_B2']
@@ -127,6 +128,8 @@ for idx in range(noImages):
     df['HerbBio.g.m2'] = [agb_model.predict(df.iloc[maxNIR[0], 4:-1].values.reshape(1,-1))[0]]*n
     df['Roots.kg.m2'] = [bgb_model.predict(df.iloc[maxNIR[0], 4:-2].values.reshape(1,-1))[0]]*n
     all_data = pd.concat([all_data, df])
+
+all_data.head()
 
 # predict on dataframe
 if not all_data.empty:
