@@ -5,7 +5,9 @@ Created on Mon Apr 22 11:03:25 2024
 @author: jonyegbula
 """
 
-import os, ee, pickle
+import os
+import ee
+import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
@@ -43,7 +45,7 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 5    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 9313    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
@@ -61,7 +63,7 @@ dem_bands = dem.clip(shapefile_bbox)
 slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
-cols = ['Pixel', 'Date', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
+cols = ['Date', 'Pixel', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
         'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
 flow_values, latlon, lat = [], None, []
@@ -121,22 +123,27 @@ for idx in range(noImages):
     df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
     df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
-    
-    # get row of maximum NIR for predicting AGB and BGB
-    maxNIR = df[df['NIR'] == max(df['NIR'])].index
     df['CO2.umol.m2.s'] = ghg_model.predict(df.iloc[:, 4:])
-    df['HerbBio.g.m2'] = [agb_model.predict(df.iloc[maxNIR[0], 4:-1].values.reshape(1,-1))[0]]*n
-    df['Roots.kg.m2'] = [bgb_model.predict(df.iloc[maxNIR[0], 4:-2].values.reshape(1,-1))[0]]*n
     all_data = pd.concat([all_data, df])
 
 all_data.head()
+# append coordinates and convert column data types for further processing
+if not all_data.empty:
+    n = all_data.shape[0]//df.shape[0]
+    all_data['Longitude'] = lon*n
+    all_data['Latitude'] = lat*n
+    all_data['Date'] = pd.to_datetime(all_data['Date'], format="%Y-%m-%d")
+    all_data[cols[1:]] = all_data[cols[1:]].apply(pd.to_numeric)
+    all_data.reset_index(drop=True, inplace=True)
+    
+    # get indices of max NIR to predict AGB/BGB
+    maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
+    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.iloc[maxIds, 4:-3]))*n
+    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.iloc[maxIds, 4:-3]))*n
 
+all_data.head()
 # predict on dataframe
 if not all_data.empty:
-    all_data['Longitude'] = lon*(all_data.shape[0]//df.shape[0])
-    all_data['Latitude'] = lat*(all_data.shape[0]//df.shape[0])
-    all_data.head()
-    
     # convert to projected coordinates so that resolution would be meaningful
     lats = all_data['Latitude'].values
     lons = all_data['Longitude'].values
