@@ -7,6 +7,7 @@ Created on Mon Apr 22 11:03:25 2024
 
 import os
 import ee
+import math
 import pickle
 import warnings
 import pandas as pd
@@ -45,7 +46,7 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 9313    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 5    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
@@ -66,33 +67,13 @@ slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
 cols = ['Date', 'Pixel', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
         'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
-flow_values, latlon, lat = [], None, []
+flow_values, elev_values, new_bbox = [], [], set()
+latlon, lat = None, []
 
 # iterate through each landsat image
 for idx in range(noImages):
     # extract pixel coordinates and band values from landsat
     landsat_image = ee.Image(image_list.get(idx))
-    
-    if not flow_values:     # only extract once for the same meadow
-        flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
-        elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['elevation']
-        slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['slope']
-        n = len(flow_values)
-    
-    if not latlon or len(lat) != n:      # only extract pixel coordinates once as value is constant for the same meadow
-        latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
-        if not lat or len(lat) != n:      # if no coordinate found, skip iteration (probably cloud/snow cover)
-            lat = [feat['geometry']['coordinates'][1] for feat in latlon]
-            lon = [feat['geometry']['coordinates'][0] for feat in latlon]
-    band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
-    
-    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
-        continue
-    print(idx, end=' ')
-    
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
@@ -100,8 +81,99 @@ for idx in range(noImages):
     
     # align other satellite data with landsat and make resolution uniform (30m)
     gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30).clip(shapefile_bbox)
-    min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
-    max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
+    if not flow_values:     # only extract once for the same meadow
+        flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
+        n = len(flow_values)
+    
+    if n < 5000:    # 5000 is GEE's request limit
+        band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
+        min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
+        max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
+        if not latlon or len(lat) != n:      # only extract pixel coordinates once as value is constant for the same meadow
+            latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
+            if not lat or len(lat) != n:      # if no coordinate found, skip iteration (probably cloud/snow cover)
+                lat = [feat['geometry']['coordinates'][1] for feat in latlon]
+                lon = [feat['geometry']['coordinates'][0] for feat in latlon]        
+        if not elev_values:     # only extract once for the same meadow
+            elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['elevation']
+            slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['slope']
+    else:
+        if not new_bbox:    # split bounds of shapefile so that subregions have less than 5000 pixels
+            coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
+            xmin, ymin = coords[0]
+            xmax, ymax = coords[2]
+            num_subregions = round(math.sqrt(n/1250))   # half the dimensions of 5000 pixels for safety 
+    
+            subregion_width = (xmax - xmin) / num_subregions
+            subregion_height = (ymax - ymin) / num_subregions
+            subregions = []
+            for i in range(num_subregions):
+                for j in range(num_subregions):
+                    subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
+                                                       xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
+                    subregions.append(subregion.intersection(shapefile_bbox))
+    
+            # iterate over subregions to extract all pixel coordinates from landsat and flow (often same as gridmet and elevation)
+            latlon_flow, latlon_landsat = [], []
+            count = 0
+            for subregion in subregions:
+                samples1 = flow_30m.sample(region=subregion, scale=30, geometries=True).getInfo()['features']
+                samples2 = landsat_image.sample(region=subregion, scale=30, geometries=True).getInfo()['features']
+                if samples1:
+                    latlon_flow.extend([coords['geometry']['coordinates'] for coords in samples1])
+                if samples2:
+                    latlon_landsat.extend([coords['geometry']['coordinates'] for coords in samples2])
+                count += 1
+                if count % 10 == 0: print(count, end= ' ')
+            print()
+            
+            # a multipoint from the common coordinates defines the new bounding box for band value extraction
+            latlon_flow = set([tuple(x) for x in latlon_flow])
+            latlon_landsat = set([tuple(x) for x in latlon_landsat])
+            latlon = list(latlon_flow.intersection(latlon_landsat))
+            new_bbox = ee.Geometry.MultiPoint(latlon)
+            n = len(latlon)
+            
+            # If EEException results, split new_bbox into two parts to reduce payload
+            try:
+                flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['b1']
+                elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['elevation']
+                slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['slope']        
+            except:
+                point_bbox = ee.Geometry.MultiPoint(latlon[:int(n/2)])
+                flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['b1']
+                elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['elevation']
+                slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['slope']
+                point_bbox = ee.Geometry.MultiPoint(latlon[int(n/2):])
+                flow_values.extend(flow_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['b1'])
+                elev_values.extend(dem_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['elevation'])
+                slope_values.extend(slope_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['slope'])
+        
+        # If EEException results, split new_bbox into two parts to reduce payload
+        try:
+            band_values = landsat_image.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()
+            min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmn']
+            max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmx']
+        except:
+            point_bbox = ee.Geometry.MultiPoint(latlon[:int(n/2)])
+            band_values = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
+            min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn']
+            max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx']
+            point_bbox = ee.Geometry.MultiPoint(latlon[int(n/2):])
+            band_values2 = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
+            min_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn'])
+            max_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx'])
+            
+            # combine bands for landsat
+            for band in band_values:
+                band_values[band].extend(band_values2[band])
+            
+    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
+        continue
+    print(idx, end=' ')
     
     # temporary dataframe for each iteration to be appended to the overall dataframe
     df = pd.DataFrame(columns=cols[:-3])
