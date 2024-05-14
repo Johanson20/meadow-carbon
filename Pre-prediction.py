@@ -7,7 +7,7 @@ Created on Mon Apr 22 11:03:25 2024
 
 import os
 import ee
-import math
+import numpy as np
 import pickle
 import warnings
 import pandas as pd
@@ -105,7 +105,7 @@ for idx in range(noImages):
             coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
             xmin, ymin = coords[0]
             xmax, ymax = coords[2]
-            num_subregions = round(math.sqrt(n/1250))   # half the dimensions of 5000 pixels for safety 
+            num_subregions = round(np.sqrt(n/1250))   # half the dimensions of 5000 pixels for safety 
     
             subregion_width = (xmax - xmin) / num_subregions
             subregion_height = (ymax - ymin) / num_subregions
@@ -134,6 +134,8 @@ for idx in range(noImages):
             latlon_flow = set([tuple(x) for x in latlon_flow])
             latlon_landsat = set([tuple(x) for x in latlon_landsat])
             latlon = list(latlon_flow.intersection(latlon_landsat))
+            lat = [feat[1] for feat in latlon]
+            lon = [feat[0] for feat in latlon]
             new_bbox = ee.Geometry.MultiPoint(latlon)
             n = len(latlon)
             

@@ -4,7 +4,9 @@
 """
 
 
-import os, ee, pickle
+import os
+import ee
+import pickle
 import pandas as pd
 os.chdir("Code")    # adjust directory
 
@@ -174,15 +176,16 @@ grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters
 grid.fit(X_train, y_train)
 grid.best_params_
 
+# defaults outperform these tuned values
 bgb_model = GradientBoostingRegressor(learning_rate=0.28, max_depth=9, n_estimators=100, subsample=0.3,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
-len(gbm_model.estimators_)  # number of trees used in estimation
+len(bgb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
-y_train_pred = gbm_model.predict(X_train)
-y_test_pred = gbm_model.predict(X_test)
+y_train_pred = bgb_model.predict(X_train)
+y_test_pred = bgb_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -205,7 +208,7 @@ print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelat
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
-feat_imp = gbm_model.feature_importances_
+feat_imp = bgb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # Make regression line over y_test and it's predictions
@@ -217,7 +220,7 @@ y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
+    plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 plotFeatureImportance()
 
@@ -297,11 +300,11 @@ agb_model = GradientBoostingRegressor(learning_rate=0.29, max_depth=6, n_estimat
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
-len(gbm_model.estimators_)  # number of trees used in estimation
+len(agb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
-y_train_pred = gbm_model.predict(X_train)
-y_test_pred = gbm_model.predict(X_test)
+y_train_pred = agb_model.predict(X_train)
+y_test_pred = agb_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -324,7 +327,7 @@ print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelat
 print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
-feat_imp = gbm_model.feature_importances_
+feat_imp = agb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # Make regression line over y_test and it's predictions
@@ -336,7 +339,7 @@ y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(gbm_model.feature_names_in_)[sorted_idx])
+    plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 plotFeatureImportance()
 
