@@ -14,7 +14,7 @@ os.chdir("Code")
 ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("AllPossibleMeadows_2024-02-12.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 
@@ -42,7 +42,8 @@ for index, row in shapefile.iterrows():
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geoms))
     
     # read in flow and landsat data for every 30m square (note that flow acc actually has 463.83m resolution)
-    flow = flow_acc.reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
+    flow_30m = flow_acc.resample('bilinear')
+    flow = flow_30m.reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()['b1']
     landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskClouds)
     
     # extract mean and variance of landsat and read relevant band names
@@ -52,13 +53,13 @@ for index, row in shapefile.iterrows():
     # compute band values of landsat (try block handles failure in cases of data overload for huge meadows)
     try:
         bandVal = band_stats.select(relevant_bands).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        df.loc[index] = [row.values[0], lon, lat, flow['b1']] + [s for s in bandVal.values()]
+        df.loc[index] = [row.values[0], lon, lat, flow] + [s for s in bandVal.values()]
     except:
         bandVal = band_stats.select(relevant_bands[:8]).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
         valu = band_stats.select(relevant_bands[8:]).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        df.loc[index] = [row.values[0], lon, lat, flow['b1']] + [s for s in list(valu.values())[:2]] + [s for s in bandVal.values()] + [s for s in list(valu.values())[2:]]
+        df.loc[index] = [row.values[0], lon, lat, flow] + [s for s in list(valu.values())[:2]] + [s for s in bandVal.values()] + [s for s in list(valu.values())[2:]]
     
     if index%100==0: print(index, end=" ")
 
 shapefile = None
-df.to_csv('All_meadows_2022.csv', index=False)
+df.to_csv('csv/All_meadows_2022.csv', index=False)

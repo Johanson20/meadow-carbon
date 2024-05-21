@@ -7,15 +7,26 @@
 import os
 import ee
 import pickle
+import numpy as np
 import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-filename = "Belowground Biomass_RS Model.csv"
+filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
-# filename = "Aboveground Biomass_RS Model.csv"
+# filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
+data.head()
+
 sum(data['Longitude'].isna())
+nullIds =  list(np.where(data['Longitude'].isnull())[0])    # rows with null coordinates
+data.drop(nullIds, inplace = True)
+data.reset_index(drop=True, inplace=True)
+# adjust datetime format
+data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y")
+data['Previous_Year'] = data['SampleDate'] - pd.DateOffset(years=1)
+data['Previous_Year'] = data['Previous_Year'].dt.strftime('%Y-%m-%d')
+data['SampleDate'] = data['SampleDate'].dt.strftime('%Y-%m-%d')
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -27,7 +38,8 @@ ee.Initialize()
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-dem = ee.Image('USGS/SRTMGL1_003').select('elevation')
+dem = ee.Image('USGS/3DEP/10m').select('elevation')
+slopeDem = ee.Terrain.slope(dem)
 
 
 # add B5 (NIR) value explicitly to properties of landsat
@@ -36,13 +48,14 @@ def addB5(image):
 
 
 # extract unique years and create a dictionary of landsat data for each year
-years = set(x[:4] for x in data.loc[:, 'SampleDate'])
+years = set([x[:4] for x in data.loc[:, 'SampleDate']] + [x[:4] for x in data.loc[:, 'Previous_Year']])
 landsat = {}
 for year in years:
     landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
 
 
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
+prev_Blue, prev_Green, prev_Red, prev_NIR, prev_SWIR_1, prev_SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation = [], [], []
 min_temp, max_temp, peak_dates = [], [], []
 # populate bands by applying above functions for each pixel in dataframe
@@ -50,21 +63,9 @@ for idx in range(data.shape[0]):
     # extract coordinates and date from csv
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
-    year = data.loc[idx, 'SampleDate'][:4]
     target_date = data.loc[idx, 'SampleDate']
-
-    # compute min and max temperature from gridmet (resolution = 4,638.3m)
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    bands = ee.Image(gridmet_filtered.first()).select(['tmmn', 'tmmx'])
-    temperature_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    tmin = temperature_values['tmmn']
-    tmax = temperature_values['tmmx']
-    
-    # compute flow accumulation (463.83m resolution); slope and aspect (30m resolution)
-    flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-    slopeDem = ee.Terrain.slope(dem)
-    slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+    year = target_date[:4]
+    previous_year = data.loc[idx, 'Previous_Year'][:4]
     
     # filter landsat by location and year, and sort by NIR (B5) then extract band values
     spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(addB5)
@@ -74,12 +75,42 @@ for idx in range(data.shape[0]):
     band_values = list(band_values.values())
     peak_day = peak_sorted_image.getInfo()['properties']['DATE_ACQUIRED']
     
+    # extract same peak landsat band values for previous year
+    spatial_filtered_with_b5 = landsat[previous_year].filterBounds(point).map(addB5)
+    peak_sorted_image = spatial_filtered_with_b5.sort('B5_value', False).first()
+    bands = peak_sorted_image.select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
+    prev_band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    prev_band_values = list(prev_band_values.values())
+    
+    # compute min and max temperature from gridmet (resolution = 4,638.3m)
+    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
+    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30).select(['tmmn', 'tmmx'])
+    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    tmin = temperature_values['tmmn']
+    tmax = temperature_values['tmmx']
+    
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
+    flow_30m = flow_acc.resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
+    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
+    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+    
     Blue.append(band_values[0])
     Green.append(band_values[1])
     Red.append(band_values[2])
     NIR.append(band_values[3])
     SWIR_1.append(band_values[4])
     SWIR_2.append(band_values[5])
+    
+    prev_Blue.append(prev_band_values[0])
+    prev_Green.append(prev_band_values[1])
+    prev_Red.append(prev_band_values[2])
+    prev_NIR.append(prev_band_values[3])
+    prev_SWIR_1.append(prev_band_values[4])
+    prev_SWIR_2.append(prev_band_values[5])
+    
     flow.append(flow_value)
     elevation.append(elev)
     slope.append(slope_value)
@@ -93,12 +124,20 @@ for idx in range(data.shape[0]):
 ids = [x for x in NIR if x]
 len(ids)
 
+data['prev_Blue'] = prev_Blue
+data['prev_Green'] = prev_Green
+data['prev_Red'] = prev_Red
+data['prev_NIR'] = prev_NIR
+data['prev_SWIR_1'] = prev_SWIR_1
+data['prev_SWIR_2'] = prev_SWIR_2
+
 data['Blue'] = Blue
 data['Green'] = Green
 data['Red'] = Red
 data['NIR'] = NIR
 data['SWIR_1'] = SWIR_1
 data['SWIR_2'] = SWIR_2
+
 data['Flow'] = flow
 data['Elevation'] = elevation
 data['Slope'] = slope
@@ -121,7 +160,7 @@ from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
 data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
@@ -241,7 +280,7 @@ plotY()
 
 
 # same procedure as above
-data = pd.read_csv("Aboveground Biomass_RS Model_Data.csv")
+data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
 data.head()
 data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
 data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
@@ -358,7 +397,7 @@ def plotY():
 plotY()
 
 
-f = open('models.pckl', 'wb')
+f = open('files/models.pckl', 'wb')
 pickle.dump([ghg_model, agb_model, bgb_model], f)
 f.close()
 

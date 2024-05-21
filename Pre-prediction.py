@@ -24,11 +24,12 @@ warnings.filterwarnings("ignore")
 ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("AllPossibleMeadows_2024-02-12.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2018-10-01', '2019-10-01')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
-dem = ee.Image('USGS/SRTMGL1_003').select('elevation')
+dem = ee.Image('USGS/3DEP/10m').select('elevation')
+slope = ee.Terrain.slope(dem)
 
 def maskImage(image):
     quality = image.select('QA_PIXEL')
@@ -38,7 +39,7 @@ def maskImage(image):
     return image.updateMask(cloud).updateMask(cloudShadow).updateMask(snow)
 
 #load ML GBM models
-f = open('models.pckl', 'rb')
+f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 
@@ -61,7 +62,7 @@ noImages = image_list.size().getInfo()
 # clip flow, elevation and slope to meadow's bounds
 flow_band = flow_acc.clip(shapefile_bbox)
 dem_bands = dem.clip(shapefile_bbox)
-slopeDem = ee.Terrain.slope(dem).clip(shapefile_bbox)
+slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
 cols = ['Date', 'Pixel', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
@@ -77,14 +78,14 @@ for idx in range(noImages):
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
-    gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first()
+    gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
     
     # align other satellite data with landsat and make resolution uniform (30m)
-    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30).clip(shapefile_bbox)
+    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
     if not flow_values:     # only extract once for the same meadow
         flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        dem_30m = dem_bands.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        slope_30m = slopeDem.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
         flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
         n = len(flow_values)
     
@@ -137,7 +138,6 @@ for idx in range(noImages):
             lat = [feat[1] for feat in latlon]
             lon = [feat[0] for feat in latlon]
             new_bbox = ee.Geometry.MultiPoint(latlon)
-            n = len(latlon)
             
             # If EEException results, split new_bbox into two parts to reduce payload
             try:
@@ -153,7 +153,7 @@ for idx in range(noImages):
                 flow_values.extend(flow_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['b1'])
                 elev_values.extend(dem_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['elevation'])
                 slope_values.extend(slope_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['slope'])
-        
+            n = len(flow_values)
         # If EEException results, split new_bbox into two parts to reduce payload
         try:
             band_values = landsat_image.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()
@@ -223,7 +223,7 @@ if not all_data.empty:
     lons = all_data['Longitude'].values
     utm_lons, utm_lats = transform(Proj('EPSG:4326'), Proj('EPSG:32610'), lats, lons)
     res = 30
-    out_raster = "Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
+    out_raster = "files/Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
     
     # make geodataframe of relevant columns and crs of projected coordinates
     gdf = gpd.GeoDataFrame(all_data.iloc[:, 2:], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=32610)
@@ -231,3 +231,5 @@ if not all_data.empty:
     # make a grid (to be converted to a geotiff) where each column is a band (exclude geometry column)
     out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
     out_grd.rio.to_raster(out_raster)
+
+shapefile = None

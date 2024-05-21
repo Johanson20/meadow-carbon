@@ -6,7 +6,7 @@ graphics.off()
 rm(list = ls())
 
 setwd("C:/Users/jonyegbula/Documents/PointBlue/Code")
-data <- read.csv("data.csv")
+data <- read.csv("csv/data.csv")
 ids = which(is.na(data$HerbBio.g.m2) == T)
 data <- data[-ids, ]
 coordinates <- cbind(data$x, data$y)

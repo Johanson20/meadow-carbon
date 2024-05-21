@@ -10,7 +10,7 @@ import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("GHG Flux_RS Model.csv")
+data = pd.read_csv("csv/GHG Flux_RS Model.csv")
 sum(data['Longitude'].isna())
 data.head()
 
@@ -24,7 +24,8 @@ landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-dem = ee.Image('USGS/SRTMGL1_003').select('elevation')
+dem = ee.Image('USGS/3DEP/10m').select('elevation')
+slope = ee.Terrain.slope(dem)
 
 
 # Function to mask clouds
@@ -82,16 +83,18 @@ for idx in range(data.shape[0]):
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    bands = ee.Image(gridmet_filtered.first()).select(['tmmn', 'tmmx'])
-    temperature_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    gridmet_30m = gridmet_filtered.first().resample('bilinear').select(['tmmn', 'tmmx'])
+    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
     
-    # compute flow accumulation (463.83m resolution); slope and aspect (30m resolution)
-    flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-    slopeDem = ee.Terrain.slope(dem)
-    slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
+    flow_30m = flow_acc.resample('bilinear')
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
+    slope_30m = slope.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
+    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # extract Landsat band values
     vxn = 8
@@ -150,7 +153,7 @@ ids = [x for x in Blue if x]
 len(ids)
 
 # write updated dataframe to new csv file
-data.to_csv('GHG_Flux_RS_Model_Data.csv', index=False)
+data.to_csv('csv/GHG_Flux_RS_Model_Data.csv', index=False)
 
 
 # ML training starts here
@@ -163,7 +166,7 @@ from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("GHG_Flux_RS_Model_Data.csv")
+data = pd.read_csv("csv/GHG_Flux_RS_Model_Data.csv")
 data.head()
 data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
 data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
