@@ -23,10 +23,7 @@ nullIds =  list(np.where(data['Longitude'].isnull())[0])    # rows with null coo
 data.drop(nullIds, inplace = True)
 data.reset_index(drop=True, inplace=True)
 # adjust datetime format
-data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y")
-data['Previous_Year'] = data['SampleDate'] - pd.DateOffset(years=1)
-data['Previous_Year'] = data['Previous_Year'].dt.strftime('%Y-%m-%d')
-data['SampleDate'] = data['SampleDate'].dt.strftime('%Y-%m-%d')
+data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -48,7 +45,8 @@ def addB5(image):
 
 
 # extract unique years and create a dictionary of landsat data for each year
-years = set([x[:4] for x in data.loc[:, 'SampleDate']] + [x[:4] for x in data.loc[:, 'Previous_Year']])
+years = set([x[:4] for x in data.loc[:, 'SampleDate']])
+years.append(str(int(min(years)) - 1))
 landsat = {}
 for year in years:
     landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
@@ -65,7 +63,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year = target_date[:4]
-    previous_year = data.loc[idx, 'Previous_Year'][:4]
+    previous_year = str(int(year) - 1)
     
     # filter landsat by location and year, and sort by NIR (B5) then extract band values
     spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(addB5)
@@ -74,6 +72,7 @@ for idx in range(data.shape[0]):
     band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     band_values = list(band_values.values())
     peak_day = peak_sorted_image.getInfo()['properties']['DATE_ACQUIRED']
+    mycrs = peak_sorted_image.projection()
     
     # extract same peak landsat band values for previous year
     spatial_filtered_with_b5 = landsat[previous_year].filterBounds(point).map(addB5)
@@ -84,15 +83,15 @@ for idx in range(data.shape[0]):
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
-    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30).select(['tmmn', 'tmmx'])
+    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
     temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
     
     # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
-    flow_30m = flow_acc.resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
-    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=peak_sorted_image.projection(), scale=30)
+    flow_30m = flow_acc.resample('bilinear').reproject(crs=mycrs, scale=30)
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
     flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
@@ -124,19 +123,19 @@ for idx in range(data.shape[0]):
 ids = [x for x in NIR if x]
 len(ids)
 
-data['prev_Blue'] = prev_Blue
-data['prev_Green'] = prev_Green
-data['prev_Red'] = prev_Red
-data['prev_NIR'] = prev_NIR
-data['prev_SWIR_1'] = prev_SWIR_1
-data['prev_SWIR_2'] = prev_SWIR_2
+data['prev_Blue'] = [(x*2.75e-05 - 0.2) for x in prev_Blue]
+data['prev_Green'] = [(x*2.75e-05 - 0.2) for x in prev_Green]
+data['prev_Red'] = [(x*2.75e-05 - 0.2) for x in prev_Red]
+data['prev_NIR'] = [(x*2.75e-05 - 0.2) for x in prev_NIR]
+data['prev_SWIR_1'] = [(x*2.75e-05 - 0.2) for x in prev_SWIR_1]
+data['prev_SWIR_2'] = [(x*2.75e-05 - 0.2) for x in prev_SWIR_2]
 
-data['Blue'] = Blue
-data['Green'] = Green
-data['Red'] = Red
-data['NIR'] = NIR
-data['SWIR_1'] = SWIR_1
-data['SWIR_2'] = SWIR_2
+data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
+data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
+data['Red'] = [(x*2.75e-05 - 0.2) for x in Red]
+data['NIR'] = [(x*2.75e-05 - 0.2) for x in NIR]
+data['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in SWIR_1]
+data['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in SWIR_2]
 
 data['Flow'] = flow
 data['Elevation'] = elevation
@@ -151,12 +150,11 @@ data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
 
 
 # ML training starts here
-from sklearn.model_selection import GroupShuffleSplit, GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 import matplotlib.pyplot as plt
-from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
@@ -167,13 +165,15 @@ data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
-cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+# confirm column names first
+cols = data.columns
+# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[5:] if c not in ['percentC', '...1', 'peak_date']]
+var_col = [c for c in cols[9:] if c != 'peak_date']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col[3:])]
@@ -185,6 +185,8 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
+data.dropna(subset=[y_field], inplace=True)
+data.reset_index(drop=True, inplace=True)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
 gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
@@ -193,30 +195,11 @@ train_index, test_index = next(split)
 train_data = data.iloc[train_index]
 test_data = data.iloc[test_index]
 
-X_train, y_train = train_data.loc[:, var_col[3:]], train_data[y_field]
-X_test, y_test = test_data.loc[:, var_col[3:]], test_data[y_field]
-
-''' Before using gradient boosting, optimize hyperparameters either:
-    by randomnly selecting from a range of values using RandomizedSearchCV,
-    or by grid search which searches through all provided possibilities with GridSearchCV
-'''
-# optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
-parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
-              'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
-randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=20,  scoring='neg_mean_squared_error')
-randm.fit(X_train, y_train)
-randm.best_params_      # outputs all parameters of ideal estimator
-
-# same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.01, 0.03, 0.05], 'subsample': [0.4, 0.5, 0.6, 0.7], 
-              'n_estimators': [1000, 2500, 5000], 'max_depth': [6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
-grid.fit(X_train, y_train)
-grid.best_params_
+X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
+X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.28, max_depth=9, n_estimators=100, subsample=0.3,
+bgb_model = GradientBoostingRegressor(learning_rate=0.23, max_depth=18, n_estimators=50, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
@@ -287,13 +270,15 @@ data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
-cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+# confirm column names first
+cols = data.columns
+# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[4:] if c != 'peak_date']
+var_col = [c for c in cols[7:] if c != 'peak_date']
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col[2:])]
@@ -305,6 +290,8 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
+data.dropna(subset=[y_field], inplace=True)
+data.reset_index(drop=True, inplace=True)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
 gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
@@ -313,31 +300,10 @@ train_index, test_index = next(split)
 train_data = data.iloc[train_index]
 test_data = data.iloc[test_index]
 
-X_train, y_train = train_data.loc[:, var_col[2:]], train_data[y_field]
-X_test, y_test = test_data.loc[:, var_col[2:]], test_data[y_field]
+X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
+X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-''' Before using gradient boosting, optimize hyperparameters either:
-    by randomnly selecting from a range of values using RandomizedSearchCV,
-    or by grid search which searches through all provided possibilities with GridSearchCV
-'''
-# optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
-parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
-              'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
-randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=50, scoring='neg_mean_squared_error')
-randm.fit(X_train, y_train)
-randm.best_params_      # outputs all parameters of ideal estimator
-
-# same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.001, 0.003, 0.007, 0.01, 0.02, 0.03], 'subsample': [0.4, 0.5, 0.6, 0.7], 
-              'n_estimators': [100, 250, 500, 750, 1000, 2500, 4000], 'max_depth': [3,4,5,6,7,8]}
-grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
-grid.fit(X_train, y_train)
-grid.best_params_
-
-agb_model = GradientBoostingRegressor(learning_rate=0.29, max_depth=6, n_estimators=125, subsample=0.95,
-                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=48)
+agb_model = GradientBoostingRegressor(verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
 len(agb_model.estimators_)  # number of trees used in estimation
 

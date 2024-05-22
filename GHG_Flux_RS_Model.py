@@ -27,7 +27,6 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 
-
 # Function to mask clouds
 def maskClouds(image):
     quality = image.select('QA_PIXEL')
@@ -66,7 +65,7 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 30, lands
         time_diff = nearest_image.getInfo()['properties']['time_difference']
         band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     
-    return [list(band_values.values()), time_diff]
+    return [list(band_values.values()), time_diff, nearest_image.projection()]
 
 
 # define arrays to store band values and landsat information
@@ -80,21 +79,6 @@ for idx in range(data.shape[0]):
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
-    
-    # compute min and max temperature from gridmet (resolution = 4,638.3m)
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    gridmet_30m = gridmet_filtered.first().resample('bilinear').select(['tmmn', 'tmmx'])
-    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    tmin = temperature_values['tmmn']
-    tmax = temperature_values['tmmx']
-    
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
-    flow_30m = flow_acc.resample('bilinear')
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
-    slope_30m = slope.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
-    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # extract Landsat band values
     vxn = 8
@@ -110,7 +94,22 @@ for idx in range(data.shape[0]):
             if not band_values[0]:
                 vxn = 7
                 print(idx, "Searching Landsat 7 collection with 60-day search radius")
-                band_values, t_diff = getBandValues(landsat7_collection, point, target_date, 60, 7)
+                band_values, t_diff, mycrs = getBandValues(landsat7_collection, point, target_date, 60, 7)
+    
+    # compute min and max temperature from gridmet (resolution = 4,638.3m)
+    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
+    gridmet_30m = gridmet_filtered.first().resample('bilinear').reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
+    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    tmin = temperature_values['tmmn']
+    tmax = temperature_values['tmmx']
+    
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
+    flow_30m = flow_acc.resample('bilinear').reproject(crs=mycrs, scale=30)
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+    slope_30m = slope.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # append vaues to different lists
     Blue.append(band_values[0])
@@ -130,12 +129,12 @@ for idx in range(data.shape[0]):
     if idx%100 == 0: print(idx, end=' ')
 
 
-data['Blue'] = Blue
-data['Green'] = Green
-data['Red'] = Red
-data['NIR'] = NIR
-data['SWIR_1'] = SWIR_1
-data['SWIR_2'] = SWIR_2
+data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
+data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
+data['Red'] = [(x*2.75e-05 - 0.2) for x in Red]
+data['NIR'] = [(x*2.75e-05 - 0.2) for x in NIR]
+data['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in SWIR_1]
+data['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in SWIR_2]
 data['Flow'] = flow
 data['Elevation'] = elevation
 data['Slope'] = slope
@@ -173,7 +172,9 @@ data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
-cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+# confirm column names first
+cols = data.columns
+# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
@@ -191,6 +192,8 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
+data.dropna(subset=[y_field], inplace=True)
+data.reset_index(drop=True, inplace=True)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
 gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)

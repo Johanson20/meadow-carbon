@@ -32,11 +32,14 @@ dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 
 def maskImage(image):
-    quality = image.select('QA_PIXEL')
-    cloud = quality.bitwiseAnd(1 << 3).eq(0)    # mask out cloudy pixels
-    cloudShadow = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
-    snow = quality.bitwiseAnd(1 <<5).eq(0)     # mask out snow
-    return image.updateMask(cloud).updateMask(cloudShadow).updateMask(snow)
+    qa = image.select('QA_PIXEL')
+    # mask out cloud based on bits in QA_pixel
+    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
+    cloud = qa.bitwiseAnd(1 << 3).eq(0)
+    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
+    return image.updateMask(cloud_mask)
 
 #load ML GBM models
 f = open('files/models.pckl', 'rb')
