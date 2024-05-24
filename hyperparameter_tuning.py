@@ -10,8 +10,8 @@ import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
 
-parameters = {'learning_rate': [x/100 for x in range(40)], 'subsample': [x/100 for x in range(20, 100, 10)],
-             'n_estimators': [50,75,100,125,150,200,250,500,750,1000,2000], 'max_depth': range(3,20)}
+parameters = {'learning_rate': [0.001,0.003,0.005,0.008,0.01,0.03,0.07,0.1,0.13,0.16,0.2], 'subsample': [x/100 for x in range(30, 101, 10)],
+             'n_estimators': [100,125,150,200,250,500,750,1000,2000], 'max_depth': range(3,15)}
 
 hypertune = {'RMSE': [float('Inf')], 'BIAS': [float('Inf')]}
 count = 0
@@ -44,5 +44,5 @@ for sub in parameters['subsample']:
                     hypertune['BIAS'] = [mean_bias, alpha, n_est, sub, depth, 0.2]
                 
                 count += 1
-                if count%1000 == 0:
+                if count%100 == 0:
                     print(count, end=' ')

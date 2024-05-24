@@ -46,7 +46,6 @@ def addB5(image):
 
 # extract unique years and create a dictionary of landsat data for each year
 years = set([x[:4] for x in data.loc[:, 'SampleDate']])
-years.append(str(int(min(years)) - 1))
 landsat = {}
 for year in years:
     landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
@@ -63,7 +62,6 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year = target_date[:4]
-    previous_year = str(int(year) - 1)
     
     # filter landsat by location and year, and sort by NIR (B5) then extract band values
     spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(addB5)
@@ -73,13 +71,6 @@ for idx in range(data.shape[0]):
     band_values = list(band_values.values())
     peak_day = peak_sorted_image.getInfo()['properties']['DATE_ACQUIRED']
     mycrs = peak_sorted_image.projection()
-    
-    # extract same peak landsat band values for previous year
-    spatial_filtered_with_b5 = landsat[previous_year].filterBounds(point).map(addB5)
-    peak_sorted_image = spatial_filtered_with_b5.sort('B5_value', False).first()
-    bands = peak_sorted_image.select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
-    prev_band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    prev_band_values = list(prev_band_values.values())
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
@@ -103,13 +94,6 @@ for idx in range(data.shape[0]):
     SWIR_1.append(band_values[4])
     SWIR_2.append(band_values[5])
     
-    prev_Blue.append(prev_band_values[0])
-    prev_Green.append(prev_band_values[1])
-    prev_Red.append(prev_band_values[2])
-    prev_NIR.append(prev_band_values[3])
-    prev_SWIR_1.append(prev_band_values[4])
-    prev_SWIR_2.append(prev_band_values[5])
-    
     flow.append(flow_value)
     elevation.append(elev)
     slope.append(slope_value)
@@ -122,13 +106,6 @@ for idx in range(data.shape[0]):
 # checks if they are all cloud free (should equal data.shape[0])
 ids = [x for x in NIR if x]
 len(ids)
-
-data['prev_Blue'] = [(x*2.75e-05 - 0.2) for x in prev_Blue]
-data['prev_Green'] = [(x*2.75e-05 - 0.2) for x in prev_Green]
-data['prev_Red'] = [(x*2.75e-05 - 0.2) for x in prev_Red]
-data['prev_NIR'] = [(x*2.75e-05 - 0.2) for x in prev_NIR]
-data['prev_SWIR_1'] = [(x*2.75e-05 - 0.2) for x in prev_SWIR_1]
-data['prev_SWIR_2'] = [(x*2.75e-05 - 0.2) for x in prev_SWIR_2]
 
 data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
 data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
@@ -143,6 +120,12 @@ data['Slope'] = slope
 data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 data['peak_date'] = peak_dates
+
+data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
+data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
+data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
+data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
+data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 data.head()
 
 # write updated dataframe to new csv file
@@ -160,11 +143,6 @@ import numpy as np
 # read csv containing random samples
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
-data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
-data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
-data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
-data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
-data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 # confirm column names first
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -176,7 +154,7 @@ data['ID'].value_counts()
 var_col = [c for c in cols[9:] if c != 'peak_date']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
-subdata = data.loc[:, ([y_field] + var_col[3:])]
+subdata = data.loc[:, ([y_field] + var_col)]
 
 # check for missing/null values across columns and rows respectively (confirm results below should be all 0)
 sum(subdata.isnull().any(axis=0) == True)
@@ -199,7 +177,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.23, max_depth=18, n_estimators=50, subsample=0.9,
+bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=12, n_estimators=50, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
@@ -265,11 +243,6 @@ plotY()
 # same procedure as above
 data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
 data.head()
-data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
-data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
-data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
-data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
-data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 # confirm column names first
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -281,7 +254,7 @@ data['ID'].value_counts()
 var_col = [c for c in cols[7:] if c != 'peak_date']
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
-subdata = data.loc[:, ([y_field] + var_col[2:])]
+subdata = data.loc[:, ([y_field] + var_col)]
 
 # check for missing/null values across columns and rows respectively (confirm results below should be all 0)
 sum(subdata.isnull().any(axis=0) == True)
@@ -303,7 +276,9 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(verbose=1, random_state=48)
+agb_model = GradientBoostingRegressor(learning_rate=0.33, max_depth=18, n_estimators=75, subsample=0.9,
+                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+                                       verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
 len(agb_model.estimators_)  # number of trees used in estimation
 

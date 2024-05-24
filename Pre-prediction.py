@@ -27,7 +27,7 @@ ee.Initialize()
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2018-10-01', '2019-10-01')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['pr', 'tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 
@@ -69,7 +69,8 @@ slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
 cols = ['Date', 'Pixel', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
-        'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s', 'HerbBio.g.m2', 'Roots.kg.m2']
+        'Precipitation', 'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s',
+        'HerbBio.g.m2', 'Roots.kg.m2']
 all_data = pd.DataFrame(columns=cols)
 flow_values, elev_values, new_bbox = [], [], set()
 latlon, lat = None, []
@@ -94,6 +95,7 @@ for idx in range(noImages):
     
     if n < 5000:    # 5000 is GEE's request limit
         band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
+        precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['pr']
         min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
         max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
         if not latlon or len(lat) != n:      # only extract pixel coordinates once as value is constant for the same meadow
@@ -160,15 +162,18 @@ for idx in range(noImages):
         # If EEException results, split new_bbox into two parts to reduce payload
         try:
             band_values = landsat_image.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()
+            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
             min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmn']
             max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmx']
         except:
             point_bbox = ee.Geometry.MultiPoint(latlon[:int(n/2)])
             band_values = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
+            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
             min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn']
             max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx']
             point_bbox = ee.Geometry.MultiPoint(latlon[int(n/2):])
             band_values2 = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
+            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
             min_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn'])
             max_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx'])
             
@@ -195,6 +200,7 @@ for idx in range(noImages):
     df['Slope'] = slope_values
     df['Minimum_temperature'] = min_temp
     df['Maximum_temperature'] = max_temp
+    df['Precipitation'] = precip
     df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
     df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
     df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)

@@ -21,10 +21,14 @@ ee.Initialize()
 
 # Function to mask clouds
 def maskClouds(image):
-    quality = image.select('QA_PIXEL')
-    cloud = quality.bitwiseAnd(1 << 3).eq(0)    # mask out cloudy pixels
-    cloudShadow = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
-    return image.updateMask(cloud).updateMask(cloudShadow)
+    # mask out cloud based on bits in QA_pixel
+    qa = image.select('QA_PIXEL')
+    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cloud = qa.bitwiseAnd(1 << 3).eq(0)
+    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
+    # update image with combined mask
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
+    return image.updateMask(cloud_mask)
 
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
 def calculate_time_difference(image):
