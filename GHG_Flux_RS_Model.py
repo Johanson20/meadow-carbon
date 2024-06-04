@@ -243,7 +243,7 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.003, max_depth=10, n_estimators=1500, subsample=0.9,
+ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=11, n_estimators=250, subsample=0.8,
                                        validation_fraction=0.1, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 ghg_model.fit(X_train, y_train)
