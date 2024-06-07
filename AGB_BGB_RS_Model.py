@@ -37,6 +37,7 @@ gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 
 # add B5 (NIR) value explicitly to properties of landsat
@@ -53,8 +54,8 @@ for year in years:
 
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 prev_Blue, prev_Green, prev_Red, prev_NIR, prev_SWIR_1, prev_SWIR_2 = [], [], [], [], [], []
-flow, slope, elevation = [], [], []
-min_temp, max_temp, peak_dates = [], [], []
+flow, slope, elevation, swe = [], [], [], []
+min_summer, max_summer, min_winter, max_winter, peak_dates  = [], [], [], [], []
 # populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
     # extract coordinates and date from csv
@@ -72,18 +73,22 @@ for idx in range(data.shape[0]):
     peak_day = peak_sorted_image.getInfo()['properties']['DATE_ACQUIRED']
     mycrs = peak_sorted_image.projection()
     
-    # compute min and max temperature from gridmet (resolution = 4,638.3m)
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
-    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
-    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    tmin = temperature_values['tmmn']
-    tmax = temperature_values['tmmx']
+    # compute min and max summer and winter temperature from gridmet (resolution = 4,638.3m)
+    gridmet_tmmn = gridmet.filterBounds(point).filterDate(str(int(year)-1)+'-10-01', year+'-03-31').select('tmmn')
+    gridmet_tmmx = gridmet.filterBounds(point).filterDate(year+'-04-01', year+'-09-30').select('tmmx')
+    min_winter.append(gridmet_tmmn.min().reduceRegion(ee.Reducer.min(), point, 30).getInfo()['tmmn'])
+    max_winter.append(gridmet_tmmn.max().reduceRegion(ee.Reducer.max(), point, 30).getInfo()['tmmn'])
+    min_summer.append(gridmet_tmmx.min().reduceRegion(ee.Reducer.min(), point, 30).getInfo()['tmmx'])
+    max_summer.append(gridmet_tmmx.max().reduceRegion(ee.Reducer.max(), point, 30).getInfo()['tmmx'])
     
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); daymetv4 (1km resolution)
     flow_30m = flow_acc.resample('bilinear').reproject(crs=mycrs, scale=30)
+    daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+    daymet_swe = daymetv4.resample('bilinear').reproject(crs=mycrs, scale=30)
     dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
     slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
     flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    swe_value = daymet_swe.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
@@ -97,8 +102,7 @@ for idx in range(data.shape[0]):
     flow.append(flow_value)
     elevation.append(elev)
     slope.append(slope_value)
-    min_temp.append(tmin)
-    max_temp.append(tmax)
+    swe.append(swe_value)
     peak_dates.append(peak_day)
     
     if idx%50 == 0: print(idx, end=' ')
@@ -117,8 +121,11 @@ data['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in SWIR_2]
 data['Flow'] = flow
 data['Elevation'] = elevation
 data['Slope'] = slope
-data['Minimum_temperature'] = min_temp
-data['Maximum_temperature'] = max_temp
+data['Min_summer_temp'] = min_summer
+data['Max_summer_temp'] = max_summer
+data['Min_winter_temp'] = min_winter
+data['Max_winter_temp'] = max_winter
+data['SWE'] = swe
 data['peak_date'] = peak_dates
 
 data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
@@ -151,7 +158,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c != 'peak_date']
+var_col = [c for c in cols[9:] if c not in ['peak_date', 'Min_summer_temp', 'Max_summer_temp', 'Min_winter_temp', 'Max_winter_temp']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -163,6 +170,9 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
+# drop highest 3 values of y_field (outliers)
+outlierIds = data.sort_values(y_field, ascending=False)[:3].index
+data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.reset_index(drop=True, inplace=True)
 
@@ -251,7 +261,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c != 'peak_date']
+var_col = [c for c in cols[7:] if c not in ['peak_date', 'Min_summer_temp', 'Max_summer_temp', 'Min_winter_temp', 'Max_winter_temp']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]

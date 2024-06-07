@@ -79,17 +79,18 @@ latlon, lat = None, []
 for idx in range(noImages):
     # extract pixel coordinates and band values from landsat
     landsat_image = ee.Image(image_list.get(idx))
+    mycrs = landsat_image.projection()
     # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
     gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
     
     # align other satellite data with landsat and make resolution uniform (30m)
-    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30)
     if not flow_values:     # only extract once for the same meadow
-        flow_30m = flow_band.resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
-        slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=landsat_image.projection(), scale=30)
+        flow_30m = flow_band.resample('bilinear').reproject(crs=mycrs, scale=30)
+        dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+        slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
         flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
         n = len(flow_values)
     
