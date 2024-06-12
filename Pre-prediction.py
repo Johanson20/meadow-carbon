@@ -21,7 +21,15 @@ from osgeo import gdal
 
 mydir = "Code"
 os.chdir(mydir)
+
+# Suppress warnings but show errors
 warnings.filterwarnings("ignore")
+def gdal_warning_handler(err_class, err_num, err_msg):
+    if err_class == gdal.CE_Warning:
+        pass
+    else:
+        gdal.ErrorHandler(err_class, err_num, err_msg)
+gdal.PushErrorHandler(gdal_warning_handler)
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
@@ -136,6 +144,7 @@ for idx in range(noImages):
     
     image_name = f'meadow_{meadowId}_{idx}.tif'
     bandnames = combined_image.bandNames().getInfo()
+    # suppress output of downloaded images
     with contextlib.redirect_stdout(None):
         geemap.ee_export_image(combined_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
     
