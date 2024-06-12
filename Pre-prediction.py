@@ -14,9 +14,13 @@ import pandas as pd
 import geopandas as gpd
 from datetime import datetime, timedelta
 from geocube.api.core import make_geocube
-from pyproj import Proj, transform
+import pyproj
+import geemap
+import contextlib
+from osgeo import gdal
 
-os.chdir("Code")
+mydir = "Code"
+os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 # Authenticate and initialize python access to Google Earth Engine
@@ -30,6 +34,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['pr', 'tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 def maskImage(image):
     qa = image.select('QA_PIXEL')
@@ -40,6 +45,39 @@ def maskImage(image):
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
+
+def geotiffToCsv(input_raster, bandnames, crs):
+    pd.set_option("display.precision", 20)
+    geotiff = gdal.Open(input_raster)
+    nBands = geotiff.RasterCount
+    out_csv = pd.DataFrame()
+    
+    for band in range(1, 1+nBands):
+        bandValues = geotiff.GetRasterBand(band).ReadAsArray()
+        values = []
+        for value in bandValues:
+            values.extend(value)
+        out_csv[bandnames[band-1]] = values
+    
+    geotransform = geotiff.GetGeoTransform()
+    # Loop through each pixel and extract coordinates and values
+    x_geo, y_geo = [], []
+    for y in range(geotiff.RasterYSize):
+        for x in range(geotiff.RasterXSize):
+            x_geo.append(geotransform[0] + (x+0.5) * geotransform[1] + y * geotransform[2])
+            y_geo.append(geotransform[3] + x * geotransform[4] + (y+0.5) * geotransform[5])
+    out_csv['x'] = x_geo
+    out_csv['y'] = y_geo
+    
+    # from raster projection to 4269
+    source_crs = pyproj.CRS.from_epsg(crs.split(":")[1])
+    target_crs = pyproj.CRS.from_epsg(4269)
+    latlonproj = pyproj.Transformer.from_crs(source_crs, target_crs, always_xy=True)
+    coords = latlonproj.transform(out_csv['x'].values, out_csv['y'].values)
+    out_csv['lon'] = coords[0]
+    out_csv['lat'] = coords[1]
+    geotiff = None
+    return out_csv
 
 #load ML GBM models
 f = open('files/models.pckl', 'rb')
@@ -68,178 +106,91 @@ dem_bands = dem.clip(shapefile_bbox)
 slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
-cols = ['Date', 'Pixel', 'Longitude', 'Latitude', 'Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 
-        'Precipitation', 'Minimum_temperature', 'Maximum_temperature', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'CO2.umol.m2.s',
-        'HerbBio.g.m2', 'Roots.kg.m2']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 'Precipitation',
+        'Minimum_temperature', 'Maximum_temperature', 'SWE', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
+# confirm use of temperature and SWE
 all_data = pd.DataFrame(columns=cols)
-flow_values, elev_values, new_bbox = [], [], set()
-latlon, lat = None, []
+mycrs = None
+var_col = []
 
 # iterate through each landsat image
 for idx in range(noImages):
-    # extract pixel coordinates and band values from landsat
-    landsat_image = ee.Image(image_list.get(idx))
-    mycrs = landsat_image.projection()
-    # use each date in which landsat image exists to extract bands of gridmet, flow and DEM
+    landsat_image = ee.Image(image_list.get(idx)).select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']).toFloat()
+    # use each date in which landsat image exists to extract bands of gridmet and daymet
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
+    
     gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
+    gridmet_30m = gridmet_filtered.resample('bilinear')
+    daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first()
+    daymet_30m = daymetv4.resample('bilinear')
     
     # align other satellite data with landsat and make resolution uniform (30m)
-    gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30)
-    if not flow_values:     # only extract once for the same meadow
-        flow_30m = flow_band.resample('bilinear').reproject(crs=mycrs, scale=30)
-        dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
-        slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
-        flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['b1']
-        n = len(flow_values)
+    if idx == 0:     # only extract once for the same meadow
+        mycrs = landsat_image.projection().getInfo()['crs']
+        flow_30m = flow_band.resample('bilinear').toFloat()
+        dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
+        slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
+    combined_image = landsat_image.addBands(flow_30m).addBands(dem_30m).addBands(slope_30m).addBands(gridmet_30m).addBands(daymet_30m)
+    combined_image = combined_image.clip(shapefile_bbox)
     
-    if n < 5000:    # 5000 is GEE's request limit
-        band_values = landsat_image.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()
-        precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['pr']
-        min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmn']
-        max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['tmmx']
-        if not latlon or len(lat) != n:      # only extract pixel coordinates once as value is constant for the same meadow
-            latlon = landsat_image.sample(region=shapefile_bbox, scale=30, geometries=True).getInfo()['features']
-            if not lat or len(lat) != n:      # if no coordinate found, skip iteration (probably cloud/snow cover)
-                lat = [feat['geometry']['coordinates'][1] for feat in latlon]
-                lon = [feat['geometry']['coordinates'][0] for feat in latlon]        
-        if not elev_values:     # only extract once for the same meadow
-            elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['elevation']
-            slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), shapefile_bbox, 30).getInfo()['slope']
-    else:
-        if not new_bbox:    # split bounds of shapefile so that subregions have less than 5000 pixels
-            coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
-            xmin, ymin = coords[0]
-            xmax, ymax = coords[2]
-            num_subregions = round(np.sqrt(n/1250))   # half the dimensions of 5000 pixels for safety 
+    image_name = f'meadow_{meadowId}_{idx}.tif'
+    bandnames = combined_image.bandNames().getInfo()
+    with contextlib.redirect_stdout(None):
+        geemap.ee_export_image(combined_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
     
-            subregion_width = (xmax - xmin) / num_subregions
-            subregion_height = (ymax - ymin) / num_subregions
-            subregions = []
-            for i in range(num_subregions):
-                for j in range(num_subregions):
-                    subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
-                                                       xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
-                    subregions.append(subregion.intersection(shapefile_bbox))
+    df = geotiffToCsv(image_name, bandnames, mycrs)
+    nullIds =  list(np.where(df['tmmx'].isnull())[0])
+    df.drop(nullIds, inplace = True)
+    df.reset_index(drop=True, inplace=True)
+    n = df.shape[0]
     
-            # iterate over subregions to extract all pixel coordinates from landsat and flow (often same as gridmet and elevation)
-            latlon_flow, latlon_landsat = [], []
-            count = 0
-            for subregion in subregions:
-                samples1 = flow_30m.sample(region=subregion, scale=30, geometries=True).getInfo()['features']
-                samples2 = landsat_image.sample(region=subregion, scale=30, geometries=True).getInfo()['features']
-                if samples1:
-                    latlon_flow.extend([coords['geometry']['coordinates'] for coords in samples1])
-                if samples2:
-                    latlon_landsat.extend([coords['geometry']['coordinates'] for coords in samples2])
-                count += 1
-                if count % 10 == 0: print(count, end= ' ')
-            print()
-            
-            # a multipoint from the common coordinates defines the new bounding box for band value extraction
-            latlon_flow = set([tuple(x) for x in latlon_flow])
-            latlon_landsat = set([tuple(x) for x in latlon_landsat])
-            latlon = list(latlon_flow.intersection(latlon_landsat))
-            lat = [feat[1] for feat in latlon]
-            lon = [feat[0] for feat in latlon]
-            new_bbox = ee.Geometry.MultiPoint(latlon)
-            
-            # If EEException results, split new_bbox into two parts to reduce payload
-            try:
-                flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['b1']
-                elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['elevation']
-                slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['slope']        
-            except:
-                point_bbox = ee.Geometry.MultiPoint(latlon[:int(n/2)])
-                flow_values = flow_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['b1']
-                elev_values = dem_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['elevation']
-                slope_values = slope_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['slope']
-                point_bbox = ee.Geometry.MultiPoint(latlon[int(n/2):])
-                flow_values.extend(flow_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['b1'])
-                elev_values.extend(dem_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['elevation'])
-                slope_values.extend(slope_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['slope'])
-            n = len(flow_values)
-        # If EEException results, split new_bbox into two parts to reduce payload
-        try:
-            band_values = landsat_image.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()
-            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
-            min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmn']
-            max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), new_bbox, 30).getInfo()['tmmx']
-        except:
-            point_bbox = ee.Geometry.MultiPoint(latlon[:int(n/2)])
-            band_values = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
-            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
-            min_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn']
-            max_temp = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx']
-            point_bbox = ee.Geometry.MultiPoint(latlon[int(n/2):])
-            band_values2 = landsat_image.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()
-            precip = gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['pr']
-            min_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmn'])
-            max_temp.extend(gridmet_30m.reduceRegion(ee.Reducer.toList(), point_bbox, 30).getInfo()['tmmx'])
-            
-            # combine bands for landsat
-            for band in band_values:
-                band_values[band].extend(band_values2[band])
-            
-    if n == 0 or n != len(band_values['SR_B2']):    # usually less landsat values than flow value is due to cloud/snow mask
+    if not len(df['b1']) == len(df['SR_B2']) == n:
         continue
     print(idx, end=' ')
     
     # temporary dataframe for each iteration to be appended to the overall dataframe
-    df = pd.DataFrame(columns=cols[:-3])
     df['Date'] = [date]*n
-    df['Pixel'] = list(range(1, n+1))
-    df['Blue'] = band_values['SR_B2']
-    df['Green'] = band_values['SR_B3']
-    df['Red'] = band_values['SR_B4']
-    df['NIR'] = band_values['SR_B5']
-    df['SWIR_1'] = band_values['SR_B6']
-    df['SWIR_2'] = band_values['SR_B7']
-    df['Flow'] = flow_values
-    df['Elevation'] = elev_values
-    df['Slope'] = slope_values
-    df['Minimum_temperature'] = min_temp
-    df['Maximum_temperature'] = max_temp
-    df['Precipitation'] = precip
+    df.columns = cols
+    df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
+    df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
+    df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
+    df['NIR'] = [(x*2.75e-05 - 0.2) for x in df['NIR']]
+    df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
+    df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
     df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
     df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
     df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
     df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
-    df['CO2.umol.m2.s'] = ghg_model.predict(df.iloc[:, 4:])
+    
+    if all_data.empty:  # Get relevant columns for ML prediction once
+        var_col = [c for c in df.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
+    df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, var_col])
     all_data = pd.concat([all_data, df])
 
 all_data.head()
-# append coordinates and convert column data types for further processing
 if not all_data.empty:
-    n = all_data.shape[0]//df.shape[0]
-    all_data['Longitude'] = lon*n
-    all_data['Latitude'] = lat*n
+    # change dates from strings to actual dates and get indices of max NIR to predict AGB/BGB
     all_data['Date'] = pd.to_datetime(all_data['Date'], format="%Y-%m-%d")
-    all_data[cols[1:]] = all_data[cols[1:]].apply(pd.to_numeric)
-    all_data.reset_index(drop=True, inplace=True)
-    
-    # get indices of max NIR to predict AGB/BGB
     maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
-    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.iloc[maxIds, 4:-3]))*n
-    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.iloc[maxIds, 4:-3]))*n
+    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))*n
+    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))*n
 
 all_data.head()
 # predict on dataframe
 if not all_data.empty:
-    # convert to projected coordinates so that resolution would be meaningful
-    lats = all_data['Latitude'].values
-    lons = all_data['Longitude'].values
-    utm_lons, utm_lats = transform(Proj('EPSG:4326'), Proj('EPSG:32610'), lats, lons)
+    # use projected coordinates so that resolution (30m) would be meaningful
+    utm_lons, utm_lats = all_data['X'].values, all_data['Y'].values
     res = 30
-    out_raster = "files/Image_" + str(round(feature.ID)) + "_" + str(round(feature.Area_m2)) + ".tif"
     
-    # make geodataframe of relevant columns and crs of projected coordinates
-    gdf = gpd.GeoDataFrame(all_data.iloc[:, 2:], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=32610)
-    gdf.plot()
-    # make a grid (to be converted to a geotiff) where each column is a band (exclude geometry column)
-    out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
-    out_grd.rio.to_raster(out_raster)
+    out_rasters = {1: ['_AGB.tif', 'HerbBio.g.m2'], 2: ['_BGB.tif', 'Roots.kg.m2'], 3: ['_GHG.tif', 'CO2.umol.m2.s']}
+    for i in range(1,4):
+        out_raster = "files/Image_meadow_" + str(round(feature.ID)) + out_rasters[i][0]
+        # make geodataframe of relevant columns (exclude geometry column) and projected coordinates as crs; convert to raster
+        gdf = gpd.GeoDataFrame(all_data.loc[:, var_col+[out_rasters[i][1]]], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats),
+                               crs=mycrs.split(":")[1])
+        out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
+        out_grd.rio.to_raster(out_raster)
 
 shapefile = None
