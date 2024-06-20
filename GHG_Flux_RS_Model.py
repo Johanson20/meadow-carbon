@@ -7,7 +7,9 @@
 import os
 import ee
 import pandas as pd
-os.chdir("Code")    # adjust directory
+
+mydir = "Code"      # adjust directory
+os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
 data = pd.read_csv("csv/GHG Flux_RS Model.csv")

@@ -9,7 +9,9 @@ import ee
 import pickle
 import numpy as np
 import pandas as pd
-os.chdir("Code")    # adjust directory
+
+mydir = "Code"      # adjust directory
+os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
 filename = "csv/Belowground Biomass_RS Model.csv"
@@ -170,9 +172,6 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
-# drop highest 3 values of y_field (outliers)
-outlierIds = data.sort_values(y_field, ascending=False)[:3].index
-data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.reset_index(drop=True, inplace=True)
 

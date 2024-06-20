@@ -101,7 +101,7 @@ def geotiffToCsv(input_raster, bandnames, crs):
     return out_csv
 
 #load ML GBM models
-f = open('files/models.pckl', 'rb')col=
+f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 
@@ -129,11 +129,13 @@ slopeDem = slope.clip(shapefile_bbox)
 # dataframe to store results for each meadow
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 'Precipitation',
         'Minimum_temperature', 'Maximum_temperature', 'SWE', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
-# confirm use of temperature and SWE
+# confirm use of temperature and SWE above
+all_data = pd.DataFrame(columns=cols)
 mycrs = None
 combined_image = None
 var_col = []
 bandnames = []
+subregions = [shapefile_bbox]
 
 # iterate through each landsat image
 for idx in range(noImages):
@@ -158,39 +160,56 @@ for idx in range(noImages):
     else:
         combined_image = combined_image.addBands(landsat_image).addBands(gridmet_30m)
         bandnames = bandnames + bandnames[:9]     # 9 landsat and gridmet bands
-    combined_image = combined_image.clip(shapefile_bbox)
+    
+    if feature.Area_km2 >= 100:     # split bounds of shapefile into 4 areas to stay within limit of image downloads
+        coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
+        xmin, ymin = coords[0]
+        xmax, ymax = coords[2]
+
+        subregion_width = (xmax - xmin) / 2
+        subregion_height = (ymax - ymin) / 2
+        subregions = []
+        for i in range(2):
+            for j in range(2):
+                subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
+                                                   xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
+                subregions.append(subregion.intersection(shapefile_bbox))
+
+    for i, subregion in enumerate(subregions):
+        temp_image = combined_image.clip(subregion)
+        image_name = f'meadow_{meadowId}_{i}.tif'
+
+        bandnames = temp_image.bandNames().getInfo()
+        # suppress output of downloaded images
+        with contextlib.redirect_stdout(None):
+            geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
+        shapefile = None
+        
+        df = geotiffToCsv(image_name, bandnames, mycrs)
+        nullIds =  list(np.where(df['tmmx'].isnull())[0])
+        df.drop(nullIds, inplace = True)
+        df.reset_index(drop=True, inplace=True)
+        n = df.shape[0]
+        
+        # temporary dataframe for each iteration to be appended to the overall dataframe
+        df['Date'] = [date]*n
+        df.columns = cols
+        df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
+        df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
+        df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
+        df['NIR'] = [(x*2.75e-05 - 0.2) for x in df['NIR']]
+        df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
+        df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
+        df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
+        df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
+        df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
+        df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
+        df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
+        
+        var_col = [c for c in df.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
+        df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, var_col])
+        all_data = pd.concat([all_data, df])
     print(idx, end=' ')
-
-image_name = f'meadow_{meadowId}.tif'
-bandnames = combined_image.bandNames().getInfo()
-# suppress output of downloaded images
-with contextlib.redirect_stdout(None):
-    geemap.ee_export_image(combined_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
-shapefile = None
-
-df = geotiffToCsv(image_name, bandnames, mycrs)
-nullIds =  list(np.where(df['tmmx'].isnull())[0])
-df.drop(nullIds, inplace = True)
-df.reset_index(drop=True, inplace=True)
-
-# temporary dataframe for each iteration to be appended to the overall dataframe
-df['Date'] = [date]*n
-df.columns = cols
-df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
-df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
-df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
-df['NIR'] = [(x*2.75e-05 - 0.2) for x in df['NIR']]
-df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
-df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
-df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
-df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
-df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
-df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
-df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
-
-var_col = [c for c in df.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
-df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, var_col])
-all_data = df.copy()
 
 if not all_data.empty:
     # change dates from strings to actual dates and get indices of max NIR to predict AGB/BGB
