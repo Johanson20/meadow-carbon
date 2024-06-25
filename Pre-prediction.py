@@ -42,7 +42,6 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['pr', 'tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 def maskImage(image):
     qa = image.select('QA_PIXEL')
@@ -54,31 +53,41 @@ def maskImage(image):
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
 
-def geotiffToCsv(input_raster, bandnames, crs):
+def geotiffToCsv(input_raster, bandnames, crs, allBands = False):
     # creates a dataframe of unique columns (hence combines repeating band names)
     pd.set_option("display.precision", 20)
     geotiff = gdal.Open(input_raster)
     nBands = geotiff.RasterCount
-    ncol = len(set(bandnames))
     out_csv = pd.DataFrame()
-    n = ((nBands - ncol)//9 + 1)
+    n = 1
     
-    # There are 9 (repeating) landsat and gridmet bands extracted in total
-    for col in range(1, 10):
-        values = []
-        for band in [col] + list(range(ncol+col, nBands+1, 9)):
-            bandValues = geotiff.GetRasterBand(band).ReadAsArray()
+    if allBands:
+        ncol = len(set(bandnames))
+        n = ((nBands - ncol)//9 + 1)
+        
+        # There are 9 (repeating) landsat and gridmet bands extracted in total
+        for col in range(1, 10):
+            values = []
+            for band in [col] + list(range(ncol+col, nBands+1, 9)):
+                bandValues = geotiff.GetRasterBand(band).ReadAsArray()
+                for value in bandValues:
+                    values.extend(value)
+            out_csv[bandnames[col-1]] = values
+        
+        # repeat the unique columns throughout length of dataframe
+        for col in range(10, 14):
+            bandValues = geotiff.GetRasterBand(col).ReadAsArray()
+            values = []
             for value in bandValues:
                 values.extend(value)
-        out_csv[bandnames[col-1]] = values
-    
-    # repeat the unique columns throughout length of dataframe
-    for col in range(10, 14):
-        bandValues = geotiff.GetRasterBand(col).ReadAsArray()
-        values = []
-        for value in bandValues:
-            values.extend(value)
-        out_csv[bandnames[col-1]] = values*n
+            out_csv[bandnames[col-1]] = values*n
+    else:
+        for band in range(1, 1+nBands):
+            bandValues = geotiff.GetRasterBand(band).ReadAsArray()
+            values = []
+            for value in bandValues:
+                values.extend(value)
+            out_csv[bandnames[band-1]] = values
     
     geotransform = geotiff.GetGeoTransform()
     # Loop through each pixel and extract coordinates and values
@@ -128,8 +137,7 @@ slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 'Precipitation',
-        'Minimum_temperature', 'Maximum_temperature', 'SWE', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
-# confirm use of temperature and SWE above
+        'Minimum_temperature', 'Maximum_temperature', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
 all_data = pd.DataFrame(columns=cols)
 mycrs = None
 combined_image = None
@@ -140,14 +148,12 @@ subregions = [shapefile_bbox]
 # iterate through each landsat image
 for idx in range(noImages):
     landsat_image = ee.Image(image_list.get(idx)).select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']).toFloat()
-    # use each date in which landsat image exists to extract bands of gridmet and daymet
+    # use each date in which landsat image exists to extract bands of gridmet
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
     
     gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
     gridmet_30m = gridmet_filtered.resample('bilinear')
-    daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first()
-    daymet_30m = daymetv4.resample('bilinear')
     
     # align other satellite data with landsat and make resolution uniform (30m)
     if idx == 0:     # only extract once for the same meadow
@@ -155,11 +161,11 @@ for idx in range(noImages):
         flow_30m = flow_band.resample('bilinear').toFloat()
         dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
         slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
-        combined_image = landsat_image.addBands(flow_30m).addBands(dem_30m).addBands(slope_30m).addBands(gridmet_30m).addBands(daymet_30m)
+        combined_image = landsat_image.addBands(flow_30m).addBands(dem_30m).addBands(slope_30m).addBands(gridmet_30m)
         bandnames = combined_image.bandNames().getInfo()
     else:
         combined_image = combined_image.addBands(landsat_image).addBands(gridmet_30m)
-        bandnames = bandnames + bandnames[:9]     # 9 landsat and gridmet bands
+        bandnames = bandnames + bandnames[:9]     # 9 total of: landsat and gridmet bands
     
     if feature.Area_km2 >= 100:     # split bounds of shapefile into 4 areas to stay within limit of image downloads
         coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
@@ -183,7 +189,6 @@ for idx in range(noImages):
         # suppress output of downloaded images
         with contextlib.redirect_stdout(None):
             geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
-        shapefile = None
         
         df = geotiffToCsv(image_name, bandnames, mycrs)
         nullIds =  list(np.where(df['tmmx'].isnull())[0])
@@ -194,6 +199,7 @@ for idx in range(noImages):
         # temporary dataframe for each iteration to be appended to the overall dataframe
         df['Date'] = [date]*n
         df.columns = cols
+        df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
         df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
         df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
         df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
@@ -205,15 +211,21 @@ for idx in range(noImages):
         df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
         df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
         df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
-        
-        var_col = [c for c in df.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
-        df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, var_col])
         all_data = pd.concat([all_data, df])
     print(idx, end=' ')
 
+shapefile = None
 if not all_data.empty:
-    # change dates from strings to actual dates and get indices of max NIR to predict AGB/BGB
-    all_data['Date'] = pd.to_datetime(all_data['Date'], format="%Y-%m-%d")
+    # get indices of max NIR to predict AGB/BGB
+    all_data['Min_summer_temp'] = min(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Minimum_temperature)
+    all_data['Max_summer_temp'] = max(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Maximum_temperature)
+    all_data['Min_winter_temp'] = min(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Minimum_temperature)
+    all_data['Max_winter_temp'] = max(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Maximum_temperature)
+    
+    var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
+    all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col[:-4]])
+    var_col.remove('Minimum_temperature')
+    var_col.remove('Maximum_temperature')
     maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
     all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))*n
     all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))*n
