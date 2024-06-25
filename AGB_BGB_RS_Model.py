@@ -160,7 +160,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['peak_date', 'Min_summer_temp', 'Max_summer_temp', 'Min_winter_temp', 'Max_winter_temp']]
+var_col = [c for c in cols[9:] if c not in ['peak_date', 'SWE']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -260,7 +260,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['peak_date', 'Min_summer_temp', 'Max_summer_temp', 'Min_winter_temp', 'Max_winter_temp']]
+var_col = [c for c in cols[7:] if c not in ['peak_date', 'SWE']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
