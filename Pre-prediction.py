@@ -39,7 +39,7 @@ ee.Initialize()
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2018-10-01', '2019-10-01')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['pr', 'tmmn', 'tmmx'])
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 
@@ -53,7 +53,7 @@ def maskImage(image):
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
 
-def geotiffToCsv(input_raster, bandnames, crs, allBands = False):
+def geotiffToCsv(input_raster, bandnames, crs, stackBands = False):
     # creates a dataframe of unique columns (hence combines repeating band names)
     pd.set_option("display.precision", 20)
     geotiff = gdal.Open(input_raster)
@@ -61,33 +61,39 @@ def geotiffToCsv(input_raster, bandnames, crs, allBands = False):
     out_csv = pd.DataFrame()
     n = 1
     
-    if allBands:
+    if stackBands:
         ncol = len(set(bandnames))
-        n = ((nBands - ncol)//9 + 1)
+        n = ((nBands - ncol)//8 + 1)
         
-        # There are 9 (repeating) landsat and gridmet bands extracted in total
-        for col in range(1, 10):
+        # There are 8 (repeating) landsat and gridmet bands extracted in total
+        for col in range(1, 9):
             values = []
-            for band in [col] + list(range(ncol+col, nBands+1, 9)):
+            for band in [col] + list(range(ncol+col, nBands+1, 8)):
                 bandValues = geotiff.GetRasterBand(band).ReadAsArray()
                 for value in bandValues:
                     values.extend(value)
             out_csv[bandnames[col-1]] = values
         
         # repeat the unique columns throughout length of dataframe
-        for col in range(10, 14):
+        for col in range(9, 12):
             bandValues = geotiff.GetRasterBand(col).ReadAsArray()
             values = []
             for value in bandValues:
                 values.extend(value)
             out_csv[bandnames[col-1]] = values*n
+        
+        mydate = [[x]*len(values) for x in dates]
+        all_dates = mydate[0]
+        for day1 in range(1, len(mydate)):
+            all_dates.extend(mydate[day1])
     else:
         for band in range(1, 1+nBands):
             bandValues = geotiff.GetRasterBand(band).ReadAsArray()
             values = []
             for value in bandValues:
                 values.extend(value)
-            out_csv[bandnames[band-1]] = values
+            out_csv[bandnames[band-1]] = values        
+        all_dates = dates*len(values)
     
     geotransform = geotiff.GetGeoTransform()
     # Loop through each pixel and extract coordinates and values
@@ -107,6 +113,7 @@ def geotiffToCsv(input_raster, bandnames, crs, allBands = False):
     out_csv['lon'] = coords[0]
     out_csv['lat'] = coords[1]
     geotiff = None
+    out_csv['Date'] = all_dates
     return out_csv
 
 #load ML GBM models
@@ -118,7 +125,7 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 5    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 16680    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
@@ -136,14 +143,15 @@ dem_bands = dem.clip(shapefile_bbox)
 slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Flow', 'Elevation', 'Slope', 'Precipitation',
-        'Minimum_temperature', 'Maximum_temperature', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature',
+        'Flow', 'Elevation', 'Slope', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
 all_data = pd.DataFrame(columns=cols)
 mycrs = None
 combined_image = None
 var_col = []
 bandnames = []
 subregions = [shapefile_bbox]
+dates = []
 
 # iterate through each landsat image
 for idx in range(noImages):
@@ -151,6 +159,7 @@ for idx in range(noImages):
     # use each date in which landsat image exists to extract bands of gridmet
     date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
     start_date = datetime.strptime(date, '%Y-%m-%d')
+    dates.append(date)
     
     gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
     gridmet_30m = gridmet_filtered.resample('bilinear')
@@ -161,62 +170,67 @@ for idx in range(noImages):
         flow_30m = flow_band.resample('bilinear').toFloat()
         dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
         slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
-        combined_image = landsat_image.addBands(flow_30m).addBands(dem_30m).addBands(slope_30m).addBands(gridmet_30m)
+        combined_image = landsat_image.addBands(gridmet_30m).addBands(flow_30m).addBands(dem_30m).addBands(slope_30m)
         bandnames = combined_image.bandNames().getInfo()
     else:
         combined_image = combined_image.addBands(landsat_image).addBands(gridmet_30m)
-        bandnames = bandnames + bandnames[:9]     # 9 total of: landsat and gridmet bands
-    
-    if feature.Area_km2 >= 100:     # split bounds of shapefile into 4 areas to stay within limit of image downloads
-        coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
-        xmin, ymin = coords[0]
-        xmax, ymax = coords[2]
-
-        subregion_width = (xmax - xmin) / 2
-        subregion_height = (ymax - ymin) / 2
-        subregions = []
-        for i in range(2):
-            for j in range(2):
-                subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
-                                                   xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
-                subregions.append(subregion.intersection(shapefile_bbox))
-
-    for i, subregion in enumerate(subregions):
-        temp_image = combined_image.clip(subregion)
-        image_name = f'meadow_{meadowId}_{i}.tif'
-
-        bandnames = temp_image.bandNames().getInfo()
-        # suppress output of downloaded images
-        with contextlib.redirect_stdout(None):
-            geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=shapefile_bbox, crs=mycrs)
-        
-        df = geotiffToCsv(image_name, bandnames, mycrs)
-        nullIds =  list(np.where(df['tmmx'].isnull())[0])
-        df.drop(nullIds, inplace = True)
-        df.reset_index(drop=True, inplace=True)
-        n = df.shape[0]
-        
-        # temporary dataframe for each iteration to be appended to the overall dataframe
-        df['Date'] = [date]*n
-        df.columns = cols
-        df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
-        df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
-        df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
-        df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
-        df['NIR'] = [(x*2.75e-05 - 0.2) for x in df['NIR']]
-        df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
-        df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
-        df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
-        df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
-        df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
-        df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
-        df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
-        all_data = pd.concat([all_data, df])
+        bandnames = bandnames.copy() + bandnames[:8]     # 8 total of: landsat and gridmet bands
     print(idx, end=' ')
+    
+if feature.Area_km2 > 30:     # split bounds of shapefile into smaller regions to stay within limit of image downloads
+    coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
+    xmin, ymin = coords[0]
+    xmax, ymax = coords[2]
+
+    num_subregions = round(np.sqrt(feature.Area_km2/14))
+    subregion_width = (xmax - xmin) / num_subregions
+    subregion_height = (ymax - ymin) / num_subregions
+    subregions = []
+    for i in range(num_subregions):
+        for j in range(num_subregions):
+            subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
+                                               xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
+            if subregion.intersects(shapefile_bbox).getInfo():
+                subregions.append(subregion.intersection(shapefile_bbox))
+    
+for i, subregion in enumerate(subregions):
+    temp_image = combined_image.clip(subregion)
+    image_name = f'meadow_{meadowId}_{i}.tif'
+
+    # suppress output of downloaded images
+    with contextlib.redirect_stdout(None):
+        geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=subregion, crs=mycrs)
+    
+    while not os.path.exists(image_name):
+        continue
+    
+    df = geotiffToCsv(image_name, bandnames, mycrs, True)
+    nullIds =  list(np.where(df['tmmx'].isnull())[0])
+    df.drop(nullIds, inplace = True)
+    df.reset_index(drop=True, inplace=True)
+    n = df.shape[0]
+    
+    # temporary dataframe for each iteration to be appended to the overall dataframe
+    df.columns = cols
+    df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
+    df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
+    df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
+    df['Red'] = [(x*2.75e-05 - 0.2) for x in df['Red']]
+    df['NIR'] = [(x*2.75e-05 - 0.2) for x in df['NIR']]
+    df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
+    df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
+    df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
+    df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
+    df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
+    df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
+    df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
+    all_data = pd.concat([all_data, df])
+    
 
 shapefile = None
+all_data.head()
 if not all_data.empty:
-    # get indices of max NIR to predict AGB/BGB
+    all_data.dropna(inplace=True)
     all_data['Min_summer_temp'] = min(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Minimum_temperature)
     all_data['Max_summer_temp'] = max(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Maximum_temperature)
     all_data['Min_winter_temp'] = min(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Minimum_temperature)
@@ -226,6 +240,7 @@ if not all_data.empty:
     all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col[:-4]])
     var_col.remove('Minimum_temperature')
     var_col.remove('Maximum_temperature')
+    # get indices of max NIR to predict AGB/BGB
     maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
     all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))*n
     all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))*n
