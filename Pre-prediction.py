@@ -53,47 +53,37 @@ def maskImage(image):
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
 
-def geotiffToCsv(input_raster, bandnames, crs, stackBands = False):
+def geotiffToCsv(input_raster, bandnames, crs):
     # creates a dataframe of unique columns (hence combines repeating band names)
     pd.set_option("display.precision", 20)
     geotiff = gdal.Open(input_raster)
     nBands = geotiff.RasterCount
     out_csv = pd.DataFrame()
-    n = 1
     
-    if stackBands:
-        ncol = len(set(bandnames))
-        n = ((nBands - ncol)//8 + 1)
-        
-        # There are 8 (repeating) landsat and gridmet bands extracted in total
-        for col in range(1, 9):
-            values = []
-            for band in [col] + list(range(ncol+col, nBands+1, 8)):
-                bandValues = geotiff.GetRasterBand(band).ReadAsArray()
-                for value in bandValues:
-                    values.extend(value)
-            out_csv[bandnames[col-1]] = values
-        
-        # repeat the unique columns throughout length of dataframe
-        for col in range(9, 12):
-            bandValues = geotiff.GetRasterBand(col).ReadAsArray()
-            values = []
-            for value in bandValues:
-                values.extend(value)
-            out_csv[bandnames[col-1]] = values*n
-        
-        mydate = [[x]*len(values) for x in dates]
-        all_dates = mydate[0]
-        for day1 in range(1, len(mydate)):
-            all_dates.extend(mydate[day1])
-    else:
-        for band in range(1, 1+nBands):
+    ncol = len(set(bandnames))
+    n = ((nBands - ncol)//8 + 1)
+    
+    # There are 8 (repeating) landsat and gridmet bands extracted in total
+    for col in range(1, 9):
+        values = []
+        for band in [col] + list(range(ncol+col, nBands+1, 8)):
             bandValues = geotiff.GetRasterBand(band).ReadAsArray()
-            values = []
             for value in bandValues:
                 values.extend(value)
-            out_csv[bandnames[band-1]] = values        
-        all_dates = dates*len(values)
+        out_csv[bandnames[col-1]] = values
+    
+    # repeat the unique columns throughout length of dataframe
+    for col in range(9, 12):
+        bandValues = geotiff.GetRasterBand(col).ReadAsArray()
+        values = []
+        for value in bandValues:
+            values.extend(value)
+        out_csv[bandnames[col-1]] = values*n
+    
+    mydate = [[x]*len(values) for x in dates]
+    all_dates = mydate[0]
+    for day1 in range(1, len(mydate)):
+        all_dates.extend(mydate[day1])
     
     geotransform = geotiff.GetGeoTransform()
     # Loop through each pixel and extract coordinates and values
@@ -125,12 +115,15 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 16680    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 17902    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
 elif feature.geometry.geom_type == 'MultiPolygon':
     shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-5)
+
+if not shapefile_bbox.bounds().coordinates().getInfo():
+    print("Empty!")
 
 # convert landsat image collection over each meadow to list for iteration
 landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskImage)
@@ -144,7 +137,7 @@ slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature',
-        'Flow', 'Elevation', 'Slope', 'X', 'Y', 'Longitude', 'Latitude', 'Date']
+        'Flow', 'Elevation', 'Slope', 'X', 'Y', 'Longitude', 'Latitude', 'Date', 'Pixel']
 all_data = pd.DataFrame(columns=cols)
 mycrs = None
 combined_image = None
@@ -177,12 +170,12 @@ for idx in range(noImages):
         bandnames = bandnames.copy() + bandnames[:8]     # 8 total of: landsat and gridmet bands
     print(idx, end=' ')
     
-if feature.Area_km2 > 30:     # split bounds of shapefile into smaller regions to stay within limit of image downloads
+if feature.Area_km2 > 20:     # split bounds of shapefile into smaller regions to stay within limit of image downloads
     coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
     xmin, ymin = coords[0]
     xmax, ymax = coords[2]
 
-    num_subregions = round(np.sqrt(feature.Area_km2/14))
+    num_subregions = round(np.sqrt(feature.Area_km2/5))
     subregion_width = (xmax - xmin) / num_subregions
     subregion_height = (ymax - ymin) / num_subregions
     subregions = []
@@ -204,7 +197,10 @@ for i, subregion in enumerate(subregions):
     while not os.path.exists(image_name):
         continue
     
-    df = geotiffToCsv(image_name, bandnames, mycrs, True)
+    try:
+        df = geotiffToCsv(image_name, bandnames, mycrs)
+    except:
+        continue
     nullIds =  list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
@@ -212,6 +208,7 @@ for i, subregion in enumerate(subregions):
     
     # temporary dataframe for each iteration to be appended to the overall dataframe
     df.columns = cols
+    df['Pixel'] = list(range(1, n+1))
     df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
     df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
     df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
@@ -224,27 +221,32 @@ for i, subregion in enumerate(subregions):
     df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
     df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
+    df.dropna(inplace=True)
+    NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
+    df = df[~NA_Ids]
     all_data = pd.concat([all_data, df])
     
 
 shapefile = None
 all_data.head()
 if not all_data.empty:
-    all_data.dropna(inplace=True)
     all_data['Min_summer_temp'] = min(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Minimum_temperature)
     all_data['Max_summer_temp'] = max(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Maximum_temperature)
     all_data['Min_winter_temp'] = min(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Minimum_temperature)
     all_data['Max_winter_temp'] = max(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Maximum_temperature)
     
-    var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
+    # select relevant columns and fix order of columns for ML models
+    var_col = [c for c in all_data.columns if c not in ['Date', 'Pixel', 'X', 'Y', 'Longitude', 'Latitude']]
+    var_col[6:11] = ['Flow', 'Elevation', 'Slope', 'Minimum_temperature', 'Maximum_temperature']
     all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col[:-4]])
     var_col.remove('Minimum_temperature')
     var_col.remove('Maximum_temperature')
     # get indices of max NIR to predict AGB/BGB
     maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
-    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))*n
-    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))*n
+    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))
+    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))
 
+all_data.iloc[:, [-3,-2,-1]].describe()
 all_data.head()
 # predict on dataframe
 if not all_data.empty:
@@ -254,7 +256,7 @@ if not all_data.empty:
     
     out_rasters = {1: ['_AGB.tif', 'HerbBio.g.m2'], 2: ['_BGB.tif', 'Roots.kg.m2'], 3: ['_GHG.tif', 'CO2.umol.m2.s']}
     for i in range(1,4):
-        out_raster = "files/Image_meadow_" + str(round(feature.ID)) + out_rasters[i][0]
+        out_raster = "files/Image_meadow_" + str(round(meadowId)) + out_rasters[i][0]
         # make geodataframe of relevant columns (exclude geometry column) and projected coordinates as crs; convert to raster
         gdf = gpd.GeoDataFrame(all_data.loc[:, var_col+[out_rasters[i][1]]], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats),
                                crs=mycrs.split(":")[1])
