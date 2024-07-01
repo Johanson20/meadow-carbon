@@ -160,7 +160,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['peak_date', 'SWE']]
+var_col = [c for c in cols[9:] if c not in ['peak_date','SWE','Min_summer_temp','Max_summer_temp','Min_winter_temp','Max_winter_temp']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -260,7 +260,7 @@ data.drop_duplicates(inplace=True)  # remove duplicate rows
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['peak_date', 'SWE']]
+var_col = [c for c in cols[7:] if c not in ['peak_date','SWE','Min_summer_temp','Max_summer_temp','Min_winter_temp','Max_winter_temp']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -285,6 +285,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
+# defaults chosen for final AGB
 agb_model = GradientBoostingRegressor(learning_rate=0.33, max_depth=18, n_estimators=75, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)

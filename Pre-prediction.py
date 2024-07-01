@@ -21,6 +21,7 @@ from osgeo import gdal
 
 mydir = "Code"
 os.chdir(mydir)
+pd.set_option("display.precision", 10)
 
 # Suppress warnings but show errors
 warnings.filterwarnings("ignore")
@@ -55,7 +56,6 @@ def maskImage(image):
 
 def geotiffToCsv(input_raster, bandnames, crs):
     # creates a dataframe of unique columns (hence combines repeating band names)
-    pd.set_option("display.precision", 20)
     geotiff = gdal.Open(input_raster)
     nBands = geotiff.RasterCount
     out_csv = pd.DataFrame()
@@ -115,7 +115,7 @@ f.close()
 shapefile.crs
 
 # extract a single meadow and it's geometry bounds; buffer inwards by designated amount
-meadowId = 17902    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 17041    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
@@ -136,8 +136,8 @@ dem_bands = dem.clip(shapefile_bbox)
 slopeDem = slope.clip(shapefile_bbox)
 
 # dataframe to store results for each meadow
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature',
-        'Flow', 'Elevation', 'Slope', 'X', 'Y', 'Longitude', 'Latitude', 'Date', 'Pixel']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Flow',
+        'Elevation', 'Slope', 'X', 'Y', 'Longitude', 'Latitude', 'Date', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI']
 all_data = pd.DataFrame(columns=cols)
 mycrs = None
 combined_image = None
@@ -207,8 +207,7 @@ for i, subregion in enumerate(subregions):
     n = df.shape[0]
     
     # temporary dataframe for each iteration to be appended to the overall dataframe
-    df.columns = cols
-    df['Pixel'] = list(range(1, n+1))
+    df.columns = cols[:-5]
     df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
     df['Blue'] = [(x*2.75e-05 - 0.2) for x in df['Blue']]
     df['Green'] = [(x*2.75e-05 - 0.2) for x in df['Green']]
@@ -230,23 +229,28 @@ for i, subregion in enumerate(subregions):
 shapefile = None
 all_data.head()
 if not all_data.empty:
-    all_data['Min_summer_temp'] = min(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Minimum_temperature)
-    all_data['Max_summer_temp'] = max(all_data[(all_data['Date'].dt.month < 10) | (all_data['Date'].dt.month > 3)].Maximum_temperature)
-    all_data['Min_winter_temp'] = min(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Minimum_temperature)
-    all_data['Max_winter_temp'] = max(all_data[(all_data['Date'].dt.month >= 10) | (all_data['Date'].dt.month <= 3)].Maximum_temperature)
-    
+    all_data.reset_index(drop=True, inplace=True)
     # select relevant columns and fix order of columns for ML models
-    var_col = [c for c in all_data.columns if c not in ['Date', 'Pixel', 'X', 'Y', 'Longitude', 'Latitude']]
+    var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
     var_col[6:11] = ['Flow', 'Elevation', 'Slope', 'Minimum_temperature', 'Maximum_temperature']
-    all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col[:-4]])
+    all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col])
     var_col.remove('Minimum_temperature')
     var_col.remove('Maximum_temperature')
-    # get indices of max NIR to predict AGB/BGB
-    maxIds = all_data.groupby('Pixel')['NIR'].idxmax()
-    all_data['HerbBio.g.m2'] = list(agb_model.predict(all_data.loc[maxIds, var_col]))
-    all_data['Roots.kg.m2'] = list(bgb_model.predict(all_data.loc[maxIds, var_col]))
+    # Predict AGB/BGB using max NIR per pixel (reshaping of values is needed for a single row's prediction)
+    maxIds = all_data.groupby(['Latitude', 'Longitude'])['NIR']
+    all_data['HerbBio.g.m2'] = maxIds.transform(lambda x: agb_model.predict(all_data.loc[x.idxmax(), var_col].values.reshape(1,-1))[0])
+    all_data['Roots.kg.m2'] = maxIds.transform(lambda x: bgb_model.predict(all_data.loc[x.idxmax(), var_col].values.reshape(1,-1))[0])
+    all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
+    all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+    all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
 
+# Display summaries for predictions, then winter/summer summaries for GHG
 all_data.iloc[:, [-3,-2,-1]].describe()
+GHG = all_data[(all_data.Date.dt.month >= 10) | (all_data.Date.dt.month <= 3)]
+GHG.iloc[:, [-3]].describe()
+GHG = all_data[(all_data.Date.dt.month < 10) & (all_data.Date.dt.month > 3)]
+GHG.iloc[:, [-3]].describe()
+
 all_data.head()
 # predict on dataframe
 if not all_data.empty:
