@@ -9,6 +9,7 @@ import os
 import ee
 import numpy as np
 import pickle
+import calendar
 import warnings
 import pandas as pd
 import geopandas as gpd
@@ -43,6 +44,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
+date_range = pd.date_range(start='2018-10-01', end='2019-09-30', freq='D')
 
 def maskImage(image):
     qa = image.select('QA_PIXEL')
@@ -106,6 +108,15 @@ def geotiffToCsv(input_raster, bandnames, crs):
     out_csv['Date'] = all_dates
     return out_csv
 
+def interpolate_group(df):
+    arr1 = np.array([calendar.timegm(d.timetuple()) for d in df['Date']])
+    arr2 = np.array(df['CO2.umol.m2.s'])
+    interpolated_values = np.interp([calendar.timegm(d.timetuple()) for d in date_range], arr1, arr2)
+    return pd.DataFrame({'Latitude': df['Latitude'].iloc[0], 'Longitude': df['Longitude'].iloc[0],
+                         'X': df['X'].iloc[0], 'Y': df['Y'].iloc[0],
+                         'Date': date_range, 'CO2.umol.m2.s': interpolated_values,
+                        'HerbBio.g.m2': df['HerbBio.g.m2'].iloc[0], 'Roots.kg.m2': df['Roots.kg.m2'].iloc[0]})
+
 #load ML GBM models
 f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
@@ -114,13 +125,13 @@ f.close()
 #verify CRS or convert to WGS '84
 shapefile.crs
 
-# extract a single meadow and it's geometry bounds; buffer inwards by designated amount
+# extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
 meadowId = 17041    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
-    shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-5)
+    shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
 elif feature.geometry.geom_type == 'MultiPolygon':
-    shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-5)
+    shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
 
 if not shapefile_bbox.bounds().coordinates().getInfo():
     print("Empty!")
@@ -128,7 +139,9 @@ if not shapefile_bbox.bounds().coordinates().getInfo():
 # convert landsat image collection over each meadow to list for iteration
 landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskImage)
 image_list = landsat_images.toList(landsat_images.size())
-noImages = image_list.size().getInfo()
+image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start').map(lambda date: ee.Date(date).format('YYYY-MM-dd'))}).getInfo()
+dates = image_result['image_dates']
+noImages = len(dates)
 
 # clip flow, elevation and slope to meadow's bounds
 flow_band = flow_acc.clip(shapefile_bbox)
@@ -144,15 +157,13 @@ combined_image = None
 var_col = []
 bandnames = []
 subregions = [shapefile_bbox]
-dates = []
 
 # iterate through each landsat image
 for idx in range(noImages):
     landsat_image = ee.Image(image_list.get(idx)).select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']).toFloat()
     # use each date in which landsat image exists to extract bands of gridmet
-    date = landsat_image.getInfo()['properties']['DATE_ACQUIRED']
+    date = dates[idx]
     start_date = datetime.strptime(date, '%Y-%m-%d')
-    dates.append(date)
     
     gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
     gridmet_30m = gridmet_filtered.resample('bilinear')
@@ -175,7 +186,7 @@ if feature.Area_km2 > 20:     # split bounds of shapefile into smaller regions t
     xmin, ymin = coords[0]
     xmax, ymax = coords[2]
 
-    num_subregions = round(np.sqrt(feature.Area_km2/5))
+    num_subregions = round(np.sqrt(feature.Area_km2/8))
     subregion_width = (xmax - xmin) / num_subregions
     subregion_height = (ymax - ymin) / num_subregions
     subregions = []
@@ -224,9 +235,8 @@ for i, subregion in enumerate(subregions):
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
     df = df[~NA_Ids]
     all_data = pd.concat([all_data, df])
-    
 
-shapefile = None
+print("Band data extraction done!")    
 all_data.head()
 if not all_data.empty:
     all_data.reset_index(drop=True, inplace=True)
@@ -240,29 +250,36 @@ if not all_data.empty:
     maxIds = all_data.groupby(['Latitude', 'Longitude'])['NIR']
     all_data['HerbBio.g.m2'] = maxIds.transform(lambda x: agb_model.predict(all_data.loc[x.idxmax(), var_col].values.reshape(1,-1))[0])
     all_data['Roots.kg.m2'] = maxIds.transform(lambda x: bgb_model.predict(all_data.loc[x.idxmax(), var_col].values.reshape(1,-1))[0])
-    all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
+    
+    # Turn negative AGB/BGB to zero and interpolate GHG    
     all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
     all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+    all_data = all_data.groupby(['Latitude', 'Longitude']).apply(interpolate_group).reset_index(drop=True)
+    
+    # Display summaries for predictions, then winter/summer summaries for GHG
+    all_data.iloc[:, [-3,-2,-1]].describe()
+    GHG = all_data[(all_data.Date.dt.month >= 10) | (all_data.Date.dt.month <= 3)]
+    GHG.iloc[:, [-3]].describe()
+    GHG = all_data[(all_data.Date.dt.month < 10) & (all_data.Date.dt.month > 3)]
+    GHG.iloc[:, [-3]].describe()
 
-# Display summaries for predictions, then winter/summer summaries for GHG
-all_data.iloc[:, [-3,-2,-1]].describe()
-GHG = all_data[(all_data.Date.dt.month >= 10) | (all_data.Date.dt.month <= 3)]
-GHG.iloc[:, [-3]].describe()
-GHG = all_data[(all_data.Date.dt.month < 10) & (all_data.Date.dt.month > 3)]
-GHG.iloc[:, [-3]].describe()
-
-all_data.head()
-# predict on dataframe
-if not all_data.empty:
+    print("Predictions and interpolations done!")
     # use projected coordinates so that resolution (30m) would be meaningful
-    utm_lons, utm_lats = all_data['X'].values, all_data['Y'].values
+    uniquePts = all_data.groupby(['Latitude', 'Longitude'])
+    utm_lons, utm_lats = uniquePts['X'].mean().values, uniquePts['Y'].mean().values
     res = 30
     
+    # make geodataframe of predictions and projected coordinates as crs; convert to raster
     out_rasters = {1: ['_AGB.tif', 'HerbBio.g.m2'], 2: ['_BGB.tif', 'Roots.kg.m2'], 3: ['_GHG.tif', 'CO2.umol.m2.s']}
     for i in range(1,4):
         out_raster = "files/Image_meadow_" + str(round(meadowId)) + out_rasters[i][0]
-        # make geodataframe of relevant columns (exclude geometry column) and projected coordinates as crs; convert to raster
-        gdf = gpd.GeoDataFrame(all_data.loc[:, var_col+[out_rasters[i][1]]], geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats),
+        if i == 3:
+            pixel_values = uniquePts[out_rasters[i][1]].sum().values
+        else:
+            pixel_values = uniquePts[out_rasters[i][1]].mean().values
+        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats),
                                crs=mycrs.split(":")[1])
         out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
         out_grd.rio.to_raster(out_raster)
+
+shapefile = None
