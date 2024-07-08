@@ -126,7 +126,7 @@ shapefile.crs
 
 start = datetime.now()
 # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
-meadowId = 17360    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+meadowId = 17238    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
 feature = shapefile.loc[meadowId, ]
 if feature.geometry.geom_type == 'Polygon':
     shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
@@ -199,7 +199,7 @@ if feature.Area_km2 > 11:     # split bounds of shapefile into smaller regions t
     
 for i, subregion in enumerate(subregions):
     temp_image = combined_image.clip(subregion)
-    image_name = f'meadow_{meadowId}_{i}.tif'
+    image_name = f'files/meadow_{meadowId}_{i}.tif'
 
     # suppress output of downloaded images (image limit = 48 MB)
     with contextlib.redirect_stdout(None):
@@ -239,6 +239,8 @@ for i, subregion in enumerate(subregions):
 print("Band data extraction done!")    
 all_data.head()
 if not all_data.empty:
+    mask = all_data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
+    all_data = all_data[mask]
     all_data.reset_index(drop=True, inplace=True)
     # select relevant columns and fix order of columns for ML models
     var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]
@@ -247,15 +249,18 @@ if not all_data.empty:
     var_col.remove('Minimum_temperature')
     var_col.remove('Maximum_temperature')
     # Predict AGB/BGB using max NIR per pixel (reshaping of values is needed for a single row's prediction)
-    maxIds = all_data.groupby(['Latitude', 'Longitude'])['NIR']
-    agb_bgb = pd.DataFrame()
-    agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[maxIds.idxmax().values, var_col])
-    agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[maxIds.idxmax().values, var_col])
+    
+    uniquePts = all_data.groupby(['Latitude', 'Longitude'])
+    utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
+    maxIds = uniquePts['NIR']
+    agb_bgb = pd.DataFrame({'X': utm_lons, 'Y': utm_lats})
+    agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[maxIds.idxmax(), var_col])
+    agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[maxIds.idxmax(), var_col])
     
     # Turn negative AGB/BGB to zero and interpolate GHG    
     agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
     agb_bgb.loc[agb_bgb['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-    all_data = all_data.groupby(['Latitude', 'Longitude']).apply(interpolate_group).reset_index(drop=True)
+    all_data = uniquePts.apply(interpolate_group).reset_index(drop=True)
     
     # Display summaries for AGB/BGB predictions, then winter/summer summaries for GHG
     agb_bgb.describe()
@@ -265,20 +270,18 @@ if not all_data.empty:
     GHG.iloc[:, [-1]].describe()
 
     print("Predictions and interpolations done!")
-    # use projected coordinates so that resolution (30m) would be meaningful
     uniquePts = all_data.groupby(['Latitude', 'Longitude'])
-    utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
     res = 30
-    
     # make geodataframe of predictions and projected coordinates as crs; convert to raster
     out_rasters = {1: ['_AGB.tif', 'HerbBio.g.m2'], 2: ['_BGB.tif', 'Roots.kg.m2'], 3: ['_GHG.tif', 'CO2.umol.m2.s']}
     for i in range(1,4):
         out_raster = "files/Image_meadow_" + str(round(meadowId)) + out_rasters[i][0]
         if i == 3:
-            pixel_values = uniquePts[out_rasters[i][1]].sum().values
+            pixel_values = pd.Series(uniquePts[out_rasters[i][1]].sum().values, name=out_rasters[i][1])
         else:
             pixel_values = agb_bgb[out_rasters[i][1]]
         gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
+        gdf.plot(column=out_rasters[i][1], cmap='viridis', legend=True)
         out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
         out_grd.rio.to_raster(out_raster)
 print(datetime.now() - start)

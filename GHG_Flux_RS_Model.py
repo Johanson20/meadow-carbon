@@ -79,7 +79,6 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60, lands
 
 # define arrays to store band values and landsat information
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
-prev_Green, prev_Red, prev_NIR = [], [], []
 flow, slope, elevation, driver, time_diff = [], [], [], [], []
 min_temp, max_temp = [], []
 
@@ -94,14 +93,10 @@ for idx in range(data.shape[0]):
     # extract Landsat band values
     vxn = 8
     band_values, t_diff, mycrs = getBandValues(landsat8_collection, point, target_date)
-    prev_band_values, _, _ = getBandValues(landsat8_collection, point, prev_year_date)
     if not band_values[0]:
         vxn = 7
         print(idx, "Searching Landsat 7 collection (60-day search radius)")
         band_values, t_diff, mycrs = getBandValues(landsat7_collection, point, target_date, 60, 7)
-    if not prev_band_values[0]:
-        print(idx, "Searching Landsat 7 collection for previous year")
-        prev_band_values, _, _ = getBandValues(landsat7_collection, point, prev_year_date, 60, 7)
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
@@ -126,10 +121,6 @@ for idx in range(data.shape[0]):
     SWIR_1.append(band_values[4])
     SWIR_2.append(band_values[5])
     
-    prev_Green.append(prev_band_values[1])
-    prev_Red.append(prev_band_values[2])
-    prev_NIR.append(prev_band_values[3])
-    
     flow.append(flow_value)
     elevation.append(elev)
     slope.append(slope_value)
@@ -140,12 +131,6 @@ for idx in range(data.shape[0]):
 
     if idx%100 == 0: print(idx, end=' ')
 
-
-data['prev_Green'] = [(x*2.75e-05 - 0.2) for x in prev_Green]
-data['prev_Red'] = [(x*2.75e-05 - 0.2) for x in prev_Red]
-data['prev_NIR'] = [(x*2.75e-05 - 0.2) for x in prev_NIR]
-data['prev_NDVI'] = (data['prev_NIR'] - data['prev_Red'])/(data['prev_NIR'] + data['prev_Red'])
-data['prev_NDWI'] = (data['prev_Green'] - data['prev_NIR'])/(data['prev_Green'] + data['prev_NIR'])
 
 data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
 data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
@@ -191,6 +176,8 @@ import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("csv/GHG_Flux_RS_Model_Data.csv")
+mask = data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
+data = data[mask]
 data.head()
 # confirm column names first
 # cols = data.columns

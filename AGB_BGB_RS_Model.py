@@ -151,6 +151,8 @@ import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
+mask = data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
+data = data[mask]
 data.head()
 # confirm column names first
 cols = data.columns
