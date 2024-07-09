@@ -239,8 +239,6 @@ for i, subregion in enumerate(subregions):
 print("Band data extraction done!")    
 all_data.head()
 if not all_data.empty:
-    mask = all_data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
-    all_data = all_data[mask]
     all_data.reset_index(drop=True, inplace=True)
     # select relevant columns and fix order of columns for ML models
     var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y', 'Longitude', 'Latitude']]

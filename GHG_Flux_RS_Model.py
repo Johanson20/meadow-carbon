@@ -20,7 +20,6 @@ data.head()
 #ee.Authenticate()
 ee.Initialize()
 
-
 # reads Landsat data, flow accumulation, gridmet temperature and DEM data (for slope and elevation)
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
@@ -100,26 +99,26 @@ for idx in range(data.shape[0]):
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    gridmet_30m = gridmet_filtered.first().resample('bilinear').reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
+    gridmet_30m = gridmet_filtered.first().reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
     temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
     
     # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
-    flow_30m = flow_acc.resample('bilinear').reproject(crs=mycrs, scale=30)
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
-    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+    flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
+    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # append vaues to different lists
-    Blue.append(band_values[0])
-    Green.append(band_values[1])
-    Red.append(band_values[2])
-    NIR.append(band_values[3])
-    SWIR_1.append(band_values[4])
-    SWIR_2.append(band_values[5])
+    Blue.append(band_values[0]*2.75e-05 - 0.2)
+    Green.append(band_values[1]*2.75e-05 - 0.2)
+    Red.append(band_values[2]*2.75e-05 - 0.2)
+    NIR.append(band_values[3]*2.75e-05 - 0.2)
+    SWIR_1.append(band_values[4]*2.75e-05 - 0.2)
+    SWIR_2.append(band_values[5]*2.75e-05 - 0.2)
     
     flow.append(flow_value)
     elevation.append(elev)
@@ -132,12 +131,12 @@ for idx in range(data.shape[0]):
     if idx%100 == 0: print(idx, end=' ')
 
 
-data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
-data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
-data['Red'] = [(x*2.75e-05 - 0.2) for x in Red]
-data['NIR'] = [(x*2.75e-05 - 0.2) for x in NIR]
-data['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in SWIR_1]
-data['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in SWIR_2]
+data['Blue'] = Blue
+data['Green'] = Green
+data['Red'] = Red
+data['NIR'] = NIR
+data['SWIR_1'] = SWIR_1
+data['SWIR_2'] = SWIR_2
 
 data['Flow'] = flow
 data['Elevation'] = elevation
@@ -176,8 +175,6 @@ import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("csv/GHG_Flux_RS_Model_Data.csv")
-mask = data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
-data = data[mask]
 data.head()
 # confirm column names first
 # cols = data.columns

@@ -43,19 +43,20 @@ daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 
 # add B5 (NIR) value explicitly to properties of landsat
-def addB5(image):
-    return image.set('B5_value', image.select('SR_B5').reduceRegion(ee.Reducer.mean(), point, 30).get('SR_B5'))
-
+def add_NDVI_NIR(image):
+    ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+    nir_value = image.select('SR_B5').reduceRegion(ee.Reducer.mean(), point, 30).get('SR_B5')
+    return image.set('NDVI_value', ndvi.reduceRegion(ee.Reducer.mean(), point, 30).get('NDVI')).set('NIR_value', nir_value)
+    
 
 # extract unique years and create a dictionary of landsat data for each year
 years = set([x[:4] for x in data.loc[:, 'SampleDate']])
 landsat = {}
 for year in years:
-    landsat[year] = landsat8_collection.filterDate(year+"-01-01", year+"-12-31")
+    landsat[year] = landsat8_collection.filterDate(year+"-05-01", year+"-08-31")
 
 
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
-prev_Blue, prev_Green, prev_Red, prev_NIR, prev_SWIR_1, prev_SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation, swe = [], [], [], []
 min_summer, max_summer, min_winter, max_winter, peak_dates  = [], [], [], [], []
 # populate bands by applying above functions for each pixel in dataframe
@@ -66,9 +67,9 @@ for idx in range(data.shape[0]):
     target_date = data.loc[idx, 'SampleDate']
     year = target_date[:4]
     
-    # filter landsat by location and year, and sort by NIR (B5) then extract band values
-    spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(addB5)
-    peak_sorted_image = spatial_filtered_with_b5.sort('B5_value', False).first()
+    # filter landsat by location and year, and sort by NIR or NDVI; then extract band values
+    spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(add_NDVI_NIR)
+    peak_sorted_image = spatial_filtered_with_b5.sort('NDVI_value', False).first()
     bands = peak_sorted_image.select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
     band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     band_values = list(band_values.values())
@@ -84,22 +85,22 @@ for idx in range(data.shape[0]):
     max_summer.append(gridmet_tmmx.max().reduceRegion(ee.Reducer.max(), point, 30).getInfo()['tmmx'])
     
     # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); daymetv4 (1km resolution)
-    flow_30m = flow_acc.resample('bilinear').reproject(crs=mycrs, scale=30)
+    flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
     daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
-    daymet_swe = daymetv4.resample('bilinear').reproject(crs=mycrs, scale=30)
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
-    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').reproject(crs=mycrs, scale=30)
+    daymet_swe = daymetv4.reproject(crs=mycrs, scale=30)
+    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
+    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     swe_value = daymet_swe.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
-    Blue.append(band_values[0])
-    Green.append(band_values[1])
-    Red.append(band_values[2])
-    NIR.append(band_values[3])
-    SWIR_1.append(band_values[4])
-    SWIR_2.append(band_values[5])
+    Blue.append(band_values[0]*2.75e-05 - 0.2)
+    Green.append(band_values[1]*2.75e-05 - 0.2)
+    Red.append(band_values[2]*2.75e-05 - 0.2)
+    NIR.append(band_values[3]*2.75e-05 - 0.2)
+    SWIR_1.append(band_values[4]*2.75e-05 - 0.2)
+    SWIR_2.append(band_values[5]*2.75e-05 - 0.2)
     
     flow.append(flow_value)
     elevation.append(elev)
@@ -113,12 +114,12 @@ for idx in range(data.shape[0]):
 ids = [x for x in NIR if x]
 len(ids)
 
-data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
-data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
-data['Red'] = [(x*2.75e-05 - 0.2) for x in Red]
-data['NIR'] = [(x*2.75e-05 - 0.2) for x in NIR]
-data['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in SWIR_1]
-data['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in SWIR_2]
+data['Blue'] = Blue
+data['Green'] = Green
+data['Red'] = Red
+data['NIR'] = NIR
+data['SWIR_1'] = SWIR_1
+data['SWIR_2'] = SWIR_2
 
 data['Flow'] = flow
 data['Elevation'] = elevation
@@ -150,9 +151,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
-mask = data[['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']].applymap(lambda x: 0<=x<=1).all(axis=1)
-data = data[mask]
+data = pd.read_csv("csv/Belowground Biomass_RS Model_NDVI_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns
