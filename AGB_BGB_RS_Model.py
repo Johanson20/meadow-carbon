@@ -7,7 +7,6 @@
 import os
 import ee
 import pickle
-import numpy as np
 import pandas as pd
 
 mydir = "Code"      # adjust directory
@@ -18,14 +17,16 @@ filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
+data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.head()
+data.drop('Unnamed: 0', axis=1, inplace=True)
 
-sum(data['Longitude'].isna())
-nullIds =  list(np.where(data['Longitude'].isnull())[0])    # rows with null coordinates
+data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
+nullIds =  data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index    # rows with null coordinates/dates
 data.drop(nullIds, inplace = True)
 data.reset_index(drop=True, inplace=True)
 # adjust datetime format
-data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
+data['SampleDate'] = pd.to_datetime(data['SampleDate']).dt.strftime('%Y-%m-%d')
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -157,7 +158,7 @@ data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
-data.drop_duplicates(inplace=True)  # remove duplicate rows
+data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
@@ -257,7 +258,7 @@ data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
-data.drop_duplicates(inplace=True)  # remove duplicate rows
+data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables

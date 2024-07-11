@@ -13,8 +13,11 @@ os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
 data = pd.read_csv("csv/GHG Flux_RS Model.csv")
-sum(data['Longitude'].isna())
+data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.head()
+data.drop('Unnamed: 0', axis=1, inplace=True)
+data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
+data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
 
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
@@ -43,11 +46,6 @@ def calculate_time_difference(image):
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
 
-def date_in_previous_year(today):
-    curr_date = today.split("-")
-    curr_date[0] = str(int(curr_date[0]) - 1)
-    return "-".join(curr_date)
-
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
 def getBandValues(landsat_collection, point, target_date, bufferDays = 60, landsatNo = 8):
     # filter landsat images by location
@@ -58,8 +56,12 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60, lands
     cloud_free_images = temporal_filtered.map(maskClouds)
     # Map the ImageCollection over time difference and sort to get image of closest date
     sorted_collection = cloud_free_images.map(calculate_time_difference).sort('time_difference')
+    noImages = sorted_collection.size().getInfo()
+    
+    if not noImages:
+        return [[0], None, None]
+    
     image_list = sorted_collection.toList(sorted_collection.size())
-    noImages = image_list.size().getInfo()
     nImage, band_values = 0, {'SR_B2': None}
     
     # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
@@ -87,7 +89,6 @@ for idx in range(data.shape[0]):
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
-    prev_year_date = date_in_previous_year(target_date)
     
     # extract Landsat band values
     vxn = 8
@@ -96,6 +97,10 @@ for idx in range(data.shape[0]):
         vxn = 7
         print(idx, "Searching Landsat 7 collection (60-day search radius)")
         band_values, t_diff, mycrs = getBandValues(landsat7_collection, point, target_date, 60, 7)
+    
+    if not band_values[0]:
+        data.drop(idx, inplace=True)
+        continue
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
@@ -152,8 +157,8 @@ data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
 
-# display first 10 rows of updated dataframe
-data.head(10)
+# drop unnamed column and display first 5 rows of updated dataframe
+data.head()
 
 # checks how many pixels are cloud free (non-null value);
 # all bands would be simultaneously cloud-free or not
@@ -177,14 +182,14 @@ import numpy as np
 data = pd.read_csv("csv/GHG_Flux_RS_Model_Data.csv")
 data.head()
 # confirm column names first
-# cols = data.columns
-cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+cols = data.columns
+# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
-data.drop_duplicates(inplace=True)  # remove duplicate rows
+data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[13:] if c not in ['Driver', 'Days_of_data_acquisition_offset']]
+var_col = [c for c in cols[8:] if c not in ['Driver', 'Days_of_data_acquisition_offset']]
 y_field = 'CO2.umol.m2.s'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
