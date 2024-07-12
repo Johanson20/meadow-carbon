@@ -13,9 +13,9 @@ os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
 data = pd.read_csv("csv/GHG Flux_RS Model.csv")
-data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.head()
 data.drop('Unnamed: 0', axis=1, inplace=True)
+data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
 
@@ -234,8 +234,8 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=11, n_estimators=250, subsample=0.8,
-                                       validation_fraction=0.1, n_iter_no_change=50, max_features='log2',
+ghg_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=11, n_estimators=150, subsample=0.9,
+                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 ghg_model.fit(X_train, y_train)
 len(ghg_model.estimators_)  # number of trees used in estimation

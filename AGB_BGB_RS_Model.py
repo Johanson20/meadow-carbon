@@ -17,9 +17,9 @@ filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
-data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.head()
 data.drop('Unnamed: 0', axis=1, inplace=True)
+data.drop_duplicates(inplace=True)  # remove duplicate rows
 
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 nullIds =  data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index    # rows with null coordinates/dates
@@ -52,6 +52,7 @@ def add_NDVI_NIR(image):
 
 # extract unique years and create a dictionary of landsat data for each year
 years = set([x[:4] for x in data.loc[:, 'SampleDate']])
+# years = set([x[-4:] for x in data.loc[:, 'SampleDate']])
 landsat = {}
 for year in years:
     landsat[year] = landsat8_collection.filterDate(year+"-05-01", year+"-08-31")
@@ -67,6 +68,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year = target_date[:4]
+    # year = data.loc[idx, 'SampleDate'][-4:]
     
     # filter landsat by location and year, and sort by NIR or NDVI; then extract band values
     spatial_filtered_with_b5 = landsat[year].filterBounds(point).map(add_NDVI_NIR)
@@ -152,7 +154,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/Belowground Biomass_RS Model_NDVI_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns
@@ -188,7 +190,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=12, n_estimators=50, subsample=0.9,
+bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=4, n_estimators=125, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
@@ -287,8 +289,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-# defaults chosen for final AGB
-agb_model = GradientBoostingRegressor(learning_rate=0.33, max_depth=18, n_estimators=75, subsample=0.9,
+agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=7, n_estimators=50, subsample=1,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
