@@ -15,13 +15,16 @@ import pandas as pd
 import geopandas as gpd
 from datetime import datetime, timedelta
 from geocube.api.core import make_geocube
+from joblib import Parallel, delayed
+from shapely.geometry import Polygon
 import geemap
+import multiprocessing
 import contextlib
 import rioxarray as xr
 
 mydir = "Code"
 os.chdir(mydir)
-pd.set_option("display.precision", 15)
+pd.set_option("display.precision", 16)
 
 # Suppress warnings but show errors
 warnings.filterwarnings("ignore")
@@ -32,12 +35,17 @@ ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
+shapefile['Zone_32611'] = shapefile.to_crs(32611).geometry.buffer(-30)
+shapefile['Zone_32610'] = shapefile.to_crs(32610).geometry.buffer(-30)
+date_range = pd.date_range(start='2018-10-01', end='2019-09-30', freq='D')
+ncores = multiprocessing.cpu_count()
+
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2018-10-01', '2019-10-01')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
-date_range = pd.date_range(start='2018-10-01', end='2019-09-30', freq='D')
+
 
 def maskImage(image):
     qa = image.select('QA_PIXEL')
@@ -93,19 +101,18 @@ shapefile.crs
 
 allIds = [1, 17162, 17041, 17332, 18098, 9313, 16658, 17902, 17238, 18020, 173, 15700, 17271, 5, 13, 7, 18137] #shapefile.index
 
-for meadowId in allIds:
+def processMeadow(meadowId):
     start = datetime.now()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
-    #meadowId = 17238    # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
     feature = shapefile.loc[meadowId, ]
+    if not feature['Zone_32611'] or not feature['Zone_32610']:
+        print(meadowId, "is empty!")
+        return
+    
     if feature.geometry.geom_type == 'Polygon':
         shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
     elif feature.geometry.geom_type == 'MultiPolygon':
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
-    
-    if not shapefile_bbox.bounds().coordinates().getInfo():
-        print(meadowId, "is empty!")
-        continue
     
     # convert landsat image collection over each meadow to list for iteration
     landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskImage)
@@ -123,6 +130,7 @@ for meadowId in allIds:
     cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Date', 'Flow',
             'Elevation', 'Slope', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI']
     all_data = pd.DataFrame(columns=cols)
+    df = pd.DataFrame()
     mycrs = None
     combined_image = None
     var_col = []
@@ -153,42 +161,62 @@ for meadowId in allIds:
             bandnames = bandnames.copy() + bandnames[:9]     # 9 total of: landsat and gridmet bands
         print(idx, end=' ')
         
-    if feature.Area_km2 > 11:     # split bounds of shapefile into smaller regions to stay within limit of image downloads
-        coords = shapefile_bbox.bounds().coordinates().getInfo()[0]
-        xmin, ymin = coords[0]
-        xmax, ymax = coords[2]
-    
+    if feature.Area_km2 > 15:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
+        xmin, ymin, xmax, ymax = feature.geometry.bounds
         num_subregions = round(np.sqrt(feature.Area_km2/5))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = []
         for i in range(num_subregions):
             for j in range(num_subregions):
-                subregion = ee.Geometry.Rectangle([xmin + i*subregion_width, ymin + j*subregion_height,
-                                                   xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height])
-                if subregion.intersects(shapefile_bbox).getInfo():
-                    subregions.append(subregion.intersection(shapefile_bbox))
+                subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
+                                   (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
+                if subarea.intersects(feature.geometry):
+                    subregion = ee.Geometry.Rectangle(list(subarea.bounds))
+                    subregions.append(subregion.intersection(shapefile_bbox))    
         print("\nSplit into subregions completed!", end=' ')
+    # some subregions of small meadows are still large
+    else:
+        image_name = f'files/meadow_{meadowId}_0.tif'
+        subregion = shapefile_bbox
+        with contextlib.redirect_stdout(None):
+            geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
+        
+        if os.path.exists(image_name):
+            df = geotiffToCsv(image_name, bandnames, mycrs)
+        else:
+            xmin, ymin, xmax, ymax = feature.geometry.bounds
+            num_subregions = 2
+            subregion_width = (xmax - xmin) / num_subregions
+            subregion_height = (ymax - ymin) / num_subregions
+            subregions = []
+            for i in range(num_subregions):
+                for j in range(num_subregions):
+                    subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
+                                       (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
+                                       (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
+                                       (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
+                    if subarea.intersects(feature.geometry):
+                        subregion = ee.Geometry.Rectangle(list(subarea.bounds))
+                        subregions.append(subregion.intersection(shapefile_bbox))
         
     for i, subregion in enumerate(subregions):
-        temp_image = combined_image.clip(subregion)
-        image_name = f'files/meadow_{meadowId}_{i}.tif'
-    
-        # suppress output of downloaded images (image limit = 48 MB)
-        with contextlib.redirect_stdout(None):
-            geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=subregion, crs=mycrs)
+        if df.empty:
+            temp_image = combined_image.clip(subregion)
+            image_name = f'files/meadow_{meadowId}_{i}.tif'
         
-        while not os.path.exists(image_name):
-            continue
-        
-        try:
-            df = geotiffToCsv(image_name, bandnames, mycrs)
-        except:
-            continue
+            # suppress output of downloaded images (image limit = 48 MB)
+            with contextlib.redirect_stdout(None):
+                geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=subregion, crs=mycrs)
+            try:
+                df = geotiffToCsv(image_name, bandnames, mycrs)
+            except:
+                continue
         nullIds =  list(np.where(df['tmmx'].isnull())[0])
         df.drop(nullIds, inplace = True)
         df.reset_index(drop=True, inplace=True)
-        n = df.shape[0]
         
         # temporary dataframe for each iteration to be appended to the overall dataframe
         df.columns = cols[:-5]
@@ -208,10 +236,12 @@ for meadowId in allIds:
         NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
         df = df[~NA_Ids]
         all_data = pd.concat([all_data, df])
-    
+        df = pd.DataFrame()
     print("\nBand data extraction done!")    
     all_data.head()
+    
     if not all_data.empty:
+        all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         # select relevant columns and fix order of columns for ML models
         var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y']]
@@ -237,8 +267,8 @@ for meadowId in allIds:
         GHG.iloc[:, [-1]].describe()
         GHG = all_data[(all_data.Date.dt.month < 10) & (all_data.Date.dt.month > 3)]
         GHG.iloc[:, [-1]].describe()
-    
         print("Predictions and interpolations done!")
+        
         uniquePts = all_data.groupby(['X', 'Y'])
         utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
         res = 30
@@ -255,5 +285,8 @@ for meadowId in allIds:
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
     print(datetime.now() - start)
+
+# processMeadow(173) # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+Parallel(n_jobs=ncores-2)(delayed(processMeadow)(meadowId) for meadowId in allIds)
 
 shapefile = None
