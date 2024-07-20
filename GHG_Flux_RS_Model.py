@@ -16,6 +16,7 @@ data = pd.read_csv("csv/GHG Flux_RS Model.csv")
 data.head()
 data.drop('Unnamed: 0', axis=1, inplace=True)
 data.drop_duplicates(inplace=True)  # remove duplicate rows
+data.reset_index(drop=True, inplace=True)
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
 
@@ -24,22 +25,25 @@ data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.st
 ee.Initialize()
 
 # reads Landsat data, flow accumulation, gridmet temperature and DEM data (for slope and elevation)
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
 
-def maskClouds(image):
-    # mask out cloud based on bits in QA_pixel
-    qa = image.select('QA_PIXEL')
+
+def maskAndRename(image):
+    # rename bands and mask out cloud based on bits in QA_pixel
+    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
     cloud = qa.bitwiseAnd(1 << 3).eq(0)
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
-    # update image with combined mask
-    cloud_mask = dilated_cloud.And(cloud).And(cloudShadow)
-    return image.updateMask(cloud_mask)
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
+    return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
 
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
 def calculate_time_difference(image):
@@ -47,37 +51,31 @@ def calculate_time_difference(image):
     return image.set('time_difference', time_difference)
 
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
-def getBandValues(landsat_collection, point, target_date, bufferDays = 60, landsatNo = 8):
-    # filter landsat images by location
+def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
+    # filter landsat images by location and dates about 60 day radius and sort by proximity to sample date
     spatial_filtered = landsat_collection.filterBounds(point)
-    # filter the streamlined images by dates +/- a certain number of days
     temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), ee.Date(target_date).advance(bufferDays, 'day'))
-    # apply cloud mask and sort images in the collection
-    cloud_free_images = temporal_filtered.map(maskClouds)
     # Map the ImageCollection over time difference and sort to get image of closest date
-    sorted_collection = cloud_free_images.map(calculate_time_difference).sort('time_difference')
+    sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
     noImages = sorted_collection.size().getInfo()
     
     if not noImages:
-        return [[0], None, None]
+        return [[0], None, None, None]
     
     image_list = sorted_collection.toList(sorted_collection.size())
-    nImage, band_values = 0, {'SR_B2': None}
+    nImage, band_values = 0, {'Blue': None}
     
     # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
-    while band_values['SR_B2'] == None and nImage < noImages:
+    while band_values['Blue'] == None and nImage < noImages:
         nearest_image = ee.Image(image_list.get(nImage))
         nImage += 1
-        if landsatNo == 7:
-            bands = nearest_image.select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'])
-        else:
-            bands = nearest_image.select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7'])
-        time_diff = nearest_image.getInfo()['properties']['time_difference']
-        band_values = bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+        value = nearest_image.getInfo()['properties']
+        band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     
-    return [list(band_values.values()), time_diff, nearest_image.projection()]
+    return [band_values, value['time_difference'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
 
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskAndRename)
 # define arrays to store band values and landsat information
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation, driver, time_diff = [], [], [], [], []
@@ -91,15 +89,10 @@ for idx in range(data.shape[0]):
     target_date = data.loc[idx, 'SampleDate']
     
     # extract Landsat band values
-    vxn = 8
-    band_values, t_diff, mycrs = getBandValues(landsat8_collection, point, target_date)
-    if not band_values[0]:
-        vxn = 7
-        print(idx, "Searching Landsat 7 collection (60-day search radius)")
-        band_values, t_diff, mycrs = getBandValues(landsat7_collection, point, target_date, 60, 7)
-    
-    if not band_values[0]:
+    band_values, t_diff, vxn, mycrs = getBandValues(landsat_collection, point, target_date)
+    if not band_values['Blue']:
         data.drop(idx, inplace=True)
+        print("Row", idx, "dropped!")
         continue
     
     # compute min and max temperature from gridmet (resolution = 4,638.3m)
@@ -118,12 +111,12 @@ for idx in range(data.shape[0]):
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # append vaues to different lists
-    Blue.append(band_values[0]*2.75e-05 - 0.2)
-    Green.append(band_values[1]*2.75e-05 - 0.2)
-    Red.append(band_values[2]*2.75e-05 - 0.2)
-    NIR.append(band_values[3]*2.75e-05 - 0.2)
-    SWIR_1.append(band_values[4]*2.75e-05 - 0.2)
-    SWIR_2.append(band_values[5]*2.75e-05 - 0.2)
+    Blue.append(band_values['Blue']*2.75e-05 - 0.2)
+    Green.append(band_values['Green']*2.75e-05 - 0.2)
+    Red.append(band_values['Red']*2.75e-05 - 0.2)
+    NIR.append(band_values['NIR']*2.75e-05 - 0.2)
+    SWIR_1.append(band_values['SWIR_1']*2.75e-05 - 0.2)
+    SWIR_2.append(band_values['SWIR_2']*2.75e-05 - 0.2)
     
     flow.append(flow_value)
     elevation.append(elev)

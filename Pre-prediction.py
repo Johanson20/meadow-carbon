@@ -10,7 +10,6 @@ import ee
 import numpy as np
 import pickle
 import calendar
-import warnings
 import pandas as pd
 import geopandas as gpd
 from datetime import datetime, timedelta
@@ -26,36 +25,39 @@ mydir = "Code"
 os.chdir(mydir)
 pd.set_option("display.precision", 16)
 
-# Suppress warnings but show errors
-warnings.filterwarnings("ignore")
-
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp")
 shapefile['Zone_32611'] = shapefile.to_crs(32611).geometry.buffer(-30)
 shapefile['Zone_32610'] = shapefile.to_crs(32610).geometry.buffer(-30)
-date_range = pd.date_range(start='2018-10-01', end='2019-09-30', freq='D')
 ncores = multiprocessing.cpu_count()
 
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2018-10-01', '2019-10-01')
+start_year, end_year = '2018-10-01', '2019-10-01'
+date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate('2018-10-01', '2019-10-01').select(['tmmn', 'tmmx'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 
 
-def maskImage(image):
-    qa = image.select('QA_PIXEL')
-    # mask out cloud based on bits in QA_pixel
+def maskAndRename(image):
+    # rename bands and mask out cloud based on bits in QA_pixel
+    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
     cirrus = qa.bitwiseAnd(1 << 2).eq(0)
     cloud = qa.bitwiseAnd(1 << 3).eq(0)
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
-    return image.updateMask(cloud_mask)
+    return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
 
 def geotiffToCsv(input_raster, bandnames, crs):
     # creates a dataframe of unique columns (hence combines repeating band names)
@@ -67,17 +69,17 @@ def geotiffToCsv(input_raster, bandnames, crs):
     
     out_csv = pd.DataFrame()
     ncol = len(set(bandnames))
-    n = ((nBands - ncol)//9 + 1)
+    n = ((nBands - ncol)//10 + 1)
     
-    # There are 9 (repeating) landsat and gridmet bands extracted in total
-    for col in range(1, 10):
+    # There are 10 (repeating) landsat, gridmet and constant value bands
+    for col in range(1, 11):
         values = []
-        for band in [col] + list(range(ncol+col, nBands+1, 9)):
+        for band in [col] + list(range(ncol+col, nBands+1, 10)):
             values = values + list(df[band])
         out_csv[bandnames[col-1]] = values
     
     # repeat the other columns throughout length of dataframe
-    for col in range(10, 13):
+    for col in range(11, 14):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -98,8 +100,8 @@ f.close()
 
 #verify CRS or convert to WGS '84
 shapefile.crs
-
-allIds = [1, 17162, 17041, 17332, 18098, 9313, 16658, 17902, 17238, 18020, 173, 15700, 17271, 5, 13, 7, 18137] #shapefile.index
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
+allIds = [1, 16565, 5, 7, 28, 173, 15315, 14044, 15514, 16708, 16123, 14839, 16687, 15646, 13689] #shapefile.index
 
 def processMeadow(meadowId):
     start = datetime.now()
@@ -115,10 +117,12 @@ def processMeadow(meadowId):
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
     
     # convert landsat image collection over each meadow to list for iteration
-    landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskImage)
+    landsat_images = landsat_collection.filterBounds(shapefile_bbox)
     image_list = landsat_images.toList(landsat_images.size())
-    image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start').map(lambda date: ee.Date(date).format('YYYY-MM-dd'))}).getInfo()
-    dates = image_result['image_dates']
+    image_result = ee.Dictionary({'crs': landsat_images.aggregate_array('UTM_ZONE'), 'sensor': landsat_images.aggregate_array('SPACECRAFT_ID'), 'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
+    dates = [date/1000 for date in image_result['image_dates']]
+    mycrs = 'EPSG:326' + str(image_result['crs'][0])
+    sensors = [int(sensor[-1]) for sensor in image_result['sensor']]
     noImages = len(dates)
     
     # clip flow, elevation and slope to meadow's bounds
@@ -127,38 +131,35 @@ def processMeadow(meadowId):
     slopeDem = slope.clip(shapefile_bbox)
     
     # dataframe to store results for each meadow
-    cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Date', 'Flow',
-            'Elevation', 'Slope', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI']
+    cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Date', 'Sensor',
+            'Flow', 'Elevation', 'Slope', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI']
     all_data = pd.DataFrame(columns=cols)
     df = pd.DataFrame()
-    mycrs = None
     combined_image = None
     var_col = []
-    bandnames = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'tmmn', 'tmmx', 'Date', 'b1', 'elevation', 'slope']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'Date', 'Sensor', 'b1', 'elevation', 'slope']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
     for idx in range(noImages):
-        landsat_image = ee.Image(image_list.get(idx)).select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']).toFloat()
+        landsat_image = ee.Image(image_list.get(idx)).toFloat()
         # use each date in which landsat image exists to extract bands of gridmet
-        date = dates[idx]
-        start_date = datetime.strptime(date, '%Y-%m-%d')
+        start_date = timedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
+        date = datetime.strftime(start_date, '%Y-%m-%d')
         
         gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
         gridmet_30m = gridmet_filtered.resample('bilinear')
-        landsat_date = ee.Date(landsat_image.get('system:time_start'))
-        date_band = ee.Image.constant(landsat_date.millis().divide(1000)).rename('Date')
+        date_band = ee.Image.cat([ee.Image.constant(dates[idx]).rename('Date'), ee.Image.constant(sensors[idx]).rename('Sensor')])
         
         # align other satellite data with landsat and make resolution uniform (30m)
         if idx == 0:     # only extract once for the same meadow
-            mycrs = landsat_image.projection().getInfo()['crs']
             flow_30m = flow_band.resample('bilinear').toFloat()
             dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
             combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, dem_30m, slope_30m])
         else:
             combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
-            bandnames = bandnames.copy() + bandnames[:9]     # 9 total of: landsat and gridmet bands
+            bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
         print(idx, end=' ')
         
     if feature.Area_km2 > 15:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
@@ -176,7 +177,6 @@ def processMeadow(meadowId):
                 if subarea.intersects(feature.geometry):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                     subregions.append(subregion.intersection(shapefile_bbox))    
-        print("\nSplit into subregions completed!", end=' ')
     # some subregions of small meadows are still large
     else:
         image_name = f'files/meadow_{meadowId}_0.tif'
@@ -244,11 +244,10 @@ def processMeadow(meadowId):
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         # select relevant columns and fix order of columns for ML models
-        var_col = [c for c in all_data.columns if c not in ['Date', 'X', 'Y']]
+        var_col = [c for c in all_data.columns if c not in ['Date', 'Sensor', 'X', 'Y']]
         var_col[6:11] = ['Flow', 'Elevation', 'Slope', 'Minimum_temperature', 'Maximum_temperature']
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col])
-        var_col.remove('Minimum_temperature')
-        var_col.remove('Maximum_temperature')
+        var_col = [c for c in var_col if c not in ['Minimum_temperature', 'Maximum_temperature']]
         # Predict AGB/BGB using max NDVI per pixel (reshaping of values is needed for a single row's prediction)
         
         max_NDVI_Ids = all_data[(all_data['Date'].dt.month >= 4) & (all_data['Date'].dt.month <= 9)].groupby(['X', 'Y'])['NDVI'].idxmax()
@@ -286,7 +285,7 @@ def processMeadow(meadowId):
             out_grd.rio.to_raster(out_raster)
     print(datetime.now() - start)
 
-# processMeadow(173) # 9313 (crosses image boundary), 17902 (largest), 16658 (smallest)
+# processMeadow(0) # 16687 (largest), 16565 (smallest)
 Parallel(n_jobs=ncores-2)(delayed(processMeadow)(meadowId) for meadowId in allIds)
 
 shapefile = None
