@@ -26,7 +26,7 @@ nullIds =  data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)
 data.drop(nullIds, inplace = True)
 data.reset_index(drop=True, inplace=True)
 # adjust datetime format
-data['SampleDay'] = [pd.to_datetime(x).strftime("%Y-%m-%d") if len(x) > 4 else pd.to_datetime(x).strftime("%Y") for x in data['SampleDate']]
+data['SampleDate'] = [pd.to_datetime(x).strftime("%Y-%m-%d") if len(x) > 4 else pd.to_datetime(x).strftime("%Y") for x in data['SampleDate']]
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -39,47 +39,80 @@ landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET")
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select('pr')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 
-def maskAndRename(image):
+def calculateIndices(image):
     # rename bands and mask out cloud based on bits in QA_pixel
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
+    image = image.addBands(scaled_bands, overwrite=True)
+    
+    # add indices
+    ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
+    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
+    ndsi = image.normalizedDifference(['Green', 'SWIR_1']).rename('NDSI')
+    evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
+    savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
+    bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
+    
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi])
+
+
+def maskCloud(image):
+    # rename bands and mask out cloud based on bits in QA_pixel
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
     cirrus = qa.bitwiseAnd(1 << 2).eq(0)
     cloud = qa.bitwiseAnd(1 << 3).eq(0)
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
-    return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
+    return image.updateMask(cloud_mask)
+    
 
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
 def calculate_time_difference(image):
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
 
+
 # add B5 (NIR) value explicitly to properties of landsat
-def add_NDVI_NIR(image):
-    ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
-    return image.set('NDVI_value', ndvi.reduceRegion(ee.Reducer.mean(), point, 30).get('NDVI'))
+def addPropertyIndices(image):
+    evi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('EVI')
+    ndsi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDSI')
+    ndwi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDWI')
+    return image.set({'EVI_value': evi, 'NDSI_value': ndsi, 'NDWI_value': ndwi})
 
 
-def getBandValues(landsat_collection, point, target_date, bufferDays = 60):    
-    if len(target_date) > 4:
-    # filter landsat images by location and dates about 60 day radius and sort by proximity to sample date
-        spatial_filtered = landsat_collection.filterBounds(point)
-        temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), ee.Date(target_date).advance(bufferDays, 'day'))
-        sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
+def getPeakBandValues(point, year, sortAscending=False):
+    spatial_filtered = landsat[year].filterBounds(point).map(addPropertyIndices)
+    dryImages = spatial_filtered.map(lambda image: image.updateMask(image.select('NDSI').lte(0)))
+    integrals = dryImages.sum().divide(spatial_filtered.sum()).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    
+    snowy = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDSI_value', 0)))
+    snow_dates = snowy.aggregate_array('system:time_start').getInfo()
+    if snow_dates:
+        no_snow_days =  round(pd.to_timedelta(max(snow_dates) - min(snow_dates), unit='ms')/pd.Timedelta(days=1))
     else:
-        spatial_filtered_with_b5 = landsat[target_date].filterBounds(point).map(add_NDVI_NIR)
-        sorted_collection = spatial_filtered_with_b5.sort('NDVI_value', False)
+        no_snow_days = 0
+    
+    wet = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDWI_value', 0.5)))
+    wet_dates = wet.aggregate_array('system:time_start').getInfo()
+    if wet_dates:
+        no_wet_days =  round(pd.to_timedelta(max(wet_dates) - min(wet_dates), unit='ms')/pd.Timedelta(days=1))
+    else:
+        no_wet_days = 0
+    
+    maskedImages = spatial_filtered.map(maskCloud)
+    sorted_collection = maskedImages.sort('EVI_value', sortAscending)
     
     noImages = sorted_collection.size().getInfo()
     if not noImages:
-        return [[0], None, None, None]
+        return [{'Blue': None}, {'Blue': None}, 0, 0, None, None, None]
     
     image_list = sorted_collection.toList(sorted_collection.size())
     nImage, band_values = 0, {'Blue': None}
@@ -91,43 +124,50 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
         band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
         value = nearest_image.getInfo()['properties']
             
-    return [band_values, value['DATE_ACQUIRED'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
-    
+    return [band_values, integrals, no_snow_days, no_wet_days, value['DATE_ACQUIRED'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
-landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskAndRename)
-# extract unique years and create a dictionary of landsat data for each year
-years = set([x[:4] for x in data['SampleDay']])
+
+# merge landsat, then extract unique years and create a dictionary of landsat data for each year
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(calculateIndices)
+years = set([x[:4] for x in data['SampleDate']])
 landsat = {}
 for year in years:
-    landsat[year] = landsat_collection.filterDate(year+"-01-01", year+"-12-31")
+    landsat[year] = landsat_collection.filterDate(str(int(year)-1)+"-10-01", year+"-10-01")
 
 target_date = ''
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
+NDVI, NDWI, EVI, SAVI, BSI, NDSI = [], [], [], [], [], []
 flow, slope, elevation = [], [], []
-min_temp, max_temp, peak_dates, driver  = [], [], [], []
+mean_annual_pr, swe, peak_dates, driver  = [], [], [], []
+dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
+dNDVI, dNDWI, dEVI, dSAVI, dBSI, wet, snowy = [], [], [], [], [], [], []
+
 # populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
     # extract coordinates and date from csv
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
-    target_date = data.loc[idx, 'SampleDay']
-    band_values, peak_day, vxn, mycrs = getBandValues(landsat_collection, point, target_date)
+    target_date = data.loc[idx, 'SampleDate']
+    year = target_date[:4]
+    band_values, integrals, snow_days, wet_days, peak_day, vxn, mycrs = getPeakBandValues(point, year)
     
     if not band_values['Blue']:
         data.drop(idx, inplace=True)
         print("Row", idx, "dropped!")
         continue
     
-    # compute min and max temperature from gridmet (resolution = 4,638.3m)
-    if len(target_date) <= 4:
-        target_date = peak_day
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    gridmet_30m = gridmet_filtered.first().reproject(crs=mycrs, scale=30).select(['tmmn', 'tmmx'])
-    temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    min_temp.append(temperature_values['tmmn'])
-    max_temp.append(temperature_values['tmmx'])
+    if not integrals['Blue']:
+        for band in integrals:
+            integrals[band] = 0
     
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); daymetv4 (1km resolution)
+    # compute mean annual precipitation from gridmet (resolution = 4,638.3m) and SWE from daymetv4 (1km resolution)
+    gridmet_filtered = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
+    mean_pr = gridmet_filtered.reproject(crs=mycrs, scale=30).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['pr']
+    daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+    daymet_swe = daymetv4.reproject(crs=mycrs, scale=30)
+    swe_value = daymet_swe.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); 
     flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
     dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
@@ -135,24 +175,45 @@ for idx in range(data.shape[0]):
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
-    Blue.append(band_values['Blue']*2.75e-05 - 0.2)
-    Green.append(band_values['Green']*2.75e-05 - 0.2)
-    Red.append(band_values['Red']*2.75e-05 - 0.2)
-    NIR.append(band_values['NIR']*2.75e-05 - 0.2)
-    SWIR_1.append(band_values['SWIR_1']*2.75e-05 - 0.2)
-    SWIR_2.append(band_values['SWIR_2']*2.75e-05 - 0.2)
+    Blue.append(band_values['Blue'])
+    Green.append(band_values['Green'])
+    Red.append(band_values['Red'])
+    NIR.append(band_values['NIR'])
+    SWIR_1.append(band_values['SWIR_1'])
+    SWIR_2.append(band_values['SWIR_2'])
+    NDVI.append(band_values['NDVI'])
+    NDWI.append(band_values['NDWI'])
+    EVI.append(band_values['EVI'])
+    SAVI.append(band_values['SAVI'])
+    BSI.append(band_values['BSI'])
+    NDSI.append(band_values['NDSI'])
     
+    dBlue.append(integrals['Blue'])
+    dGreen.append(integrals['Green'])
+    dRed.append(integrals['Red'])
+    dNIR.append(integrals['NIR'])
+    dSWIR_1.append(integrals['SWIR_1'])
+    dSWIR_2.append(integrals['SWIR_2'])
+    dNDVI.append(integrals['NDVI'])
+    dNDWI.append(integrals['NDWI'])
+    dEVI.append(integrals['EVI'])
+    dSAVI.append(integrals['SAVI'])
+    dBSI.append(integrals['BSI'])
+    
+    wet.append(wet_days)
+    snowy.append(snow_days)
+    mean_annual_pr.append(mean_pr)
     flow.append(flow_value)
     elevation.append(elev)
     slope.append(slope_value)
+    swe.append(swe_value)
     peak_dates.append(peak_day)
     driver.append(vxn)
     
     if idx%50 == 0: print(idx, end=' ')
 
 # checks if they are all cloud free (should equal data.shape[0])
-ids = [x for x in NIR if x]
-len(ids)
+len([x for x in NIR if x])
 
 data['Blue'] = Blue
 data['Green'] = Green
@@ -164,16 +225,33 @@ data['SWIR_2'] = SWIR_2
 data['Flow'] = flow
 data['Elevation'] = elevation
 data['Slope'] = slope
-data['Minimum_temperature'] = min_temp
-data['Maximum_temperature'] = max_temp
 data['peak_date'] = peak_dates
 data['Driver'] = driver
 
-data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
-data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
-data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
-data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
-data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
+data['NDVI'] = NDVI
+data['NDWI'] = NDWI
+data['EVI'] = EVI
+data['SAVI'] = SAVI
+data['BSI'] = BSI
+data['NDSI'] = NDSI
+data['SWE'] = swe
+data['Mean_Precipitation'] = mean_annual_pr
+data['Snow_days'] = snowy
+data['Wet_days'] = wet
+
+data['dBlue'] = dBlue
+data['dGreen'] = dGreen
+data['dRed'] = dRed
+data['dNIR'] = dNIR
+data['dSWIR_1'] = dSWIR_1
+data['dSWIR_2'] = dSWIR_2
+data['dNDVI'] = dNDVI
+data['dNDWI'] = dNDWI
+data['dEVI'] = dEVI
+data['dSAVI'] = dSAVI
+data['dBSI'] = dBSI
+
+data.reset_index(drop=True, inplace=True)
 data.head()
 
 # write updated dataframe to new csv file

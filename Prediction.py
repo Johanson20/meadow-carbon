@@ -31,11 +31,19 @@ ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp")
-shapefile['Zone_32611'] = shapefile.to_crs(32611).geometry.buffer(-30)
-shapefile['Zone_32610'] = shapefile.to_crs(32610).geometry.buffer(-30)
-ncores = multiprocessing.cpu_count()
+#verify CRS or convert to WGS '84
+shapefile.crs
+epsg_crs = "EPSG:4326"
+shapefile = shapefile.to_crs(epsg_crs)
+utm_zone11 = gpd.read_file("files/CA_UTM11.shp")
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp")
+# zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection") # Repeat all for zone 10 (make changes)
+zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
+shapefile = None
 
-start_year, end_year = '2018-10-01', '2019-10-01'
+ncores = multiprocessing.cpu_count()
+water_year = 2019
+start_year, end_year = str(water_year-1)+"-10-01", str(water_year)+"-10-01"
 date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
@@ -98,18 +106,19 @@ f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 
-#verify CRS or convert to WGS '84
-shapefile.crs
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
-allIds = [1, 16565, 5, 7, 28, 173, 15315, 14044, 15514, 16708, 16123, 14839, 16687, 15646, 13689] #shapefile.index
+# zone11_meadows['Buffer'] = zone11_meadows.to_crs(32611).geometry.buffer(-30)
+# zone11_meadows = zone11_meadows[~zone11_meadows.Buffer.is_empty]
+# zone11_meadows.reset_index(drop=True, inplace=True)
+zone10_meadows['Buffer'] = zone10_meadows.to_crs(32611).geometry.buffer(-30)
+zone10_meadows = zone10_meadows[~zone10_meadows.Buffer.is_empty]
+zone10_meadows.reset_index(drop=True, inplace=True)
+allIds = zone10_meadows.index   # [54, 96, 1299, 773, 3482, 1024, 1143, 1041, 3465]
 
 def processMeadow(meadowId):
     start = datetime.now()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
-    feature = shapefile.loc[meadowId, ]
-    if not feature['Zone_32611'] or not feature['Zone_32610']:
-        print(meadowId, "is empty!")
-        return
+    feature = zone10_meadows.loc[meadowId, :]
     
     if feature.geometry.geom_type == 'Polygon':
         shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
@@ -228,10 +237,11 @@ def processMeadow(meadowId):
         df['SWIR_1'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_1']]
         df['SWIR_2'] = [(x*2.75e-05 - 0.2) for x in df['SWIR_2']]
         df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
-        df['NDWI'] = (df['Green'] - df['NIR'])/(df['Green'] + df['NIR'])
+        df['NDWI'] = (df['NIR'] - df['SWIR_1'])/(df['NIR'] + df['SWIR_1'])
         df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
         df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
-        df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Red']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Red'])
+        df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
+        df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
         df.dropna(inplace=True)
         NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
         df = df[~NA_Ids]
@@ -244,13 +254,13 @@ def processMeadow(meadowId):
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         # select relevant columns and fix order of columns for ML models
-        var_col = [c for c in all_data.columns if c not in ['Date', 'Sensor', 'X', 'Y']]
+        var_col = [c for c in all_data.columns if c not in ['Date', 'Sensor', 'X', 'Y', 'NDSI']]
         var_col[6:11] = ['Flow', 'Elevation', 'Slope', 'Minimum_temperature', 'Maximum_temperature']
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col])
         var_col = [c for c in var_col if c not in ['Minimum_temperature', 'Maximum_temperature']]
         # Predict AGB/BGB using max NDVI per pixel (reshaping of values is needed for a single row's prediction)
         
-        max_NDVI_Ids = all_data[(all_data['Date'].dt.month >= 4) & (all_data['Date'].dt.month <= 9)].groupby(['X', 'Y'])['NDVI'].idxmax()
+        max_NDVI_Ids = all_data[(4 <= all_data['Date'].dt.month <= 9) & (all_data['NDSI'] <= 0)].groupby(['X', 'Y'])['NDVI'].idxmax()
         agb_bgb = pd.DataFrame()
         agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_NDVI_Ids, var_col])
         agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_NDVI_Ids, var_col])
@@ -285,7 +295,5 @@ def processMeadow(meadowId):
             out_grd.rio.to_raster(out_raster)
     print(datetime.now() - start)
 
-# processMeadow(0) # 16687 (largest), 16565 (smallest)
+# processMeadow(96) # 3465 (largest), 54 (smallest)
 Parallel(n_jobs=ncores-2)(delayed(processMeadow)(meadowId) for meadowId in allIds)
-
-shapefile = None

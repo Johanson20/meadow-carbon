@@ -145,10 +145,10 @@ data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 
 data['NDVI'] = (data['NIR'] - data['Red'])/(data['NIR'] + data['Red'])
-data['NDWI'] = (data['Green'] - data['NIR'])/(data['Green'] + data['NIR'])
+data['NDWI'] = (data['NIR'] - data['SWIR_1'])/(data['NIR'] + data['SWIR_1'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
-data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Red'])
+data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Blue']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Blue'])
 
 # drop unnamed column and display first 5 rows of updated dataframe
 data.head()
@@ -227,7 +227,7 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=11, n_estimators=150, subsample=0.9,
+ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=10, n_estimators=750, subsample=1,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 ghg_model.fit(X_train, y_train)
