@@ -11,7 +11,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
 
 parameters = {'learning_rate': [0.01,0.03,0.07,0.1,0.13,0.16,0.2,0.25,0.3,0.35], 'subsample': [x/100 for x in range(30, 101, 10)],
-             'n_estimators': [100,125,150,200,250,500,750,1000], 'max_depth': range(3,15)}
+             'n_estimators': [25,50,75,100,125,150,200,250,500,750,1000], 'max_depth': range(3,15)}
 
 hypertune = {'RMSE': [float('Inf')], 'BIAS': [float('Inf')]}
 count = 0

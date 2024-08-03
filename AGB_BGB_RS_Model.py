@@ -34,7 +34,7 @@ data.head()
 ee.Initialize()
 
 
-# reads Landsat data, flow accumulation, gridmet temperature and DEM data (for slope and elevation)
+# reads Landsat data, flow accumulation, daymet, gridmet temperature and DEM data (for slope and elevation)
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
@@ -47,7 +47,7 @@ daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 
 
 def calculateIndices(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
+    # rename bands and  normalize raw reflectance values
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
@@ -59,12 +59,13 @@ def calculateIndices(image):
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
+    ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
     
-    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi])
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi])
 
 
 def maskCloud(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
+    # mask out cloud based on bits in QA_pixel
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
     cirrus = qa.bitwiseAnd(1 << 2).eq(0)
@@ -72,6 +73,12 @@ def maskCloud(image):
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
+
+
+def maskSnow(image):
+    qa = image.select('QA')
+    snow = qa.bitwiseAnd(1 << 5).eq(0)
+    return image.updateMask(snow)
     
 
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
@@ -80,18 +87,22 @@ def calculate_time_difference(image):
     return image.set('time_difference', time_difference)
 
 
-# add B5 (NIR) value explicitly to properties of landsat
+# add relevant indices (for filtering) explicitly to properties of landsat
 def addPropertyIndices(image):
+    evi = image.select('EVI')
+    ndsi = image.select('NDSI')
+    evi = evi.where(ndsi.gt(0.2), 0)
+    image = image.addBands(evi, overwrite=True)
+
     evi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('EVI')
     ndsi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDSI')
     ndwi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDWI')
     return image.set({'EVI_value': evi, 'NDSI_value': ndsi, 'NDWI_value': ndwi})
 
 
+# get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def getPeakBandValues(point, year, sortAscending=False):
     spatial_filtered = landsat[year].filterBounds(point).map(addPropertyIndices)
-    dryImages = spatial_filtered.map(lambda image: image.updateMask(image.select('NDSI').lte(0)))
-    integrals = dryImages.sum().divide(spatial_filtered.sum()).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     
     snowy = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDSI_value', 0)))
     snow_dates = snowy.aggregate_array('system:time_start').getInfo()
@@ -107,8 +118,10 @@ def getPeakBandValues(point, year, sortAscending=False):
     else:
         no_wet_days = 0
     
-    maskedImages = spatial_filtered.map(maskCloud)
-    sorted_collection = maskedImages.sort('EVI_value', sortAscending)
+    spatial_filtered = spatial_filtered.map(maskCloud)
+    clearImages = spatial_filtered.map(maskSnow)
+    integrals = clearImages.sum().divide(spatial_filtered.sum()).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    sorted_collection = spatial_filtered.map(maskSnow).sort('EVI_value', sortAscending)
     
     noImages = sorted_collection.size().getInfo()
     if not noImages:
@@ -118,11 +131,14 @@ def getPeakBandValues(point, year, sortAscending=False):
     nImage, band_values = 0, {'Blue': None}
     
     # repeatedly check for cloud free pixels (non-null value)
-    while band_values['Blue'] == None and nImage < noImages:
+    while not band_values['Blue'] and nImage < noImages:
         nearest_image = ee.Image(image_list.get(nImage))
         nImage += 1
         band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-        value = nearest_image.getInfo()['properties']
+    
+    if not band_values['Blue']:
+        return [{'Blue': None}, {'Blue': None}, 0, 0, None, None, None]
+    value = nearest_image.getInfo()['properties']
             
     return [band_values, integrals, no_snow_days, no_wet_days, value['DATE_ACQUIRED'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
@@ -136,11 +152,11 @@ for year in years:
 
 target_date = ''
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
-NDVI, NDWI, EVI, SAVI, BSI, NDSI = [], [], [], [], [], []
-flow, slope, elevation = [], [], []
+NDVI, NDWI, EVI, SAVI, BSI, NDSI, NDPI = [], [], [], [], [], [], []
+flow, slope, elevation, wet, snowy = [], [], [], [], []
 mean_annual_pr, swe, peak_dates, driver  = [], [], [], []
 dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
-dNDVI, dNDWI, dEVI, dSAVI, dBSI, wet, snowy = [], [], [], [], [], [], []
+dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDSI, dNDPI = [], [], [], [], [], [], []
 
 # populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
@@ -187,6 +203,7 @@ for idx in range(data.shape[0]):
     SAVI.append(band_values['SAVI'])
     BSI.append(band_values['BSI'])
     NDSI.append(band_values['NDSI'])
+    NDPI.append(band_values['NDPI'])
     
     dBlue.append(integrals['Blue'])
     dGreen.append(integrals['Green'])
@@ -199,6 +216,8 @@ for idx in range(data.shape[0]):
     dEVI.append(integrals['EVI'])
     dSAVI.append(integrals['SAVI'])
     dBSI.append(integrals['BSI'])
+    dNDSI.append(integrals['NDSI'])
+    dNDPI.append(integrals['NDPI'])
     
     wet.append(wet_days)
     snowy.append(snow_days)
@@ -234,6 +253,7 @@ data['EVI'] = EVI
 data['SAVI'] = SAVI
 data['BSI'] = BSI
 data['NDSI'] = NDSI
+data['NDPI'] = NDPI
 data['SWE'] = swe
 data['Mean_Precipitation'] = mean_annual_pr
 data['Snow_days'] = snowy
@@ -250,6 +270,8 @@ data['dNDWI'] = dNDWI
 data['dEVI'] = dEVI
 data['dSAVI'] = dSAVI
 data['dBSI'] = dBSI
+data['dNDSI'] = dNDSI
+data['dNDPI'] = dNDPI
 
 data.reset_index(drop=True, inplace=True)
 data.head()
@@ -277,7 +299,7 @@ data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['peak_date','SWE','Min_summer_temp','Max_summer_temp','Min_winter_temp','Max_winter_temp', 'SampleDay']]
+var_col = [c for c in cols[9:] if c not in ['peak_date', 'Driver', 'NDSI']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -290,6 +312,7 @@ sum(subdata[y_field].isnull())
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
+data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
@@ -377,7 +400,7 @@ data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['peak_date','SWE','Min_summer_temp','Max_summer_temp','Min_winter_temp','Max_winter_temp', 'SampleDay']]
+var_col = [c for c in cols[7:] if c not in ['peak_date', 'Driver', 'NDSI']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -390,6 +413,7 @@ sum(subdata[y_field].isnull())
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
+data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
