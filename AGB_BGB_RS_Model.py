@@ -104,15 +104,15 @@ def addPropertyIndices(image):
 def getPeakBandValues(point, year, sortAscending=False):
     spatial_filtered = landsat[year].filterBounds(point).map(addPropertyIndices)
     
-    snowy = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDSI_value', 0)))
-    snow_dates = snowy.aggregate_array('system:time_start').getInfo()
+    snow = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDSI_value', 0)))
+    snow_dates = snow.aggregate_array('system:time_start').getInfo()
     if snow_dates:
         no_snow_days =  round(pd.to_timedelta(max(snow_dates) - min(snow_dates), unit='ms')/pd.Timedelta(days=1))
     else:
         no_snow_days = 0
     
-    wet = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDWI_value', 0.5)))
-    wet_dates = wet.aggregate_array('system:time_start').getInfo()
+    water = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDWI_value', 0.5)))
+    wet_dates = water.aggregate_array('system:time_start').getInfo()
     if wet_dates:
         no_wet_days =  round(pd.to_timedelta(max(wet_dates) - min(wet_dates), unit='ms')/pd.Timedelta(days=1))
     else:
@@ -139,7 +139,7 @@ def getPeakBandValues(point, year, sortAscending=False):
     if not band_values['Blue']:
         return [{'Blue': None}, {'Blue': None}, 0, 0, None, None, None]
     value = nearest_image.getInfo()['properties']
-            
+     
     return [band_values, integrals, no_snow_days, no_wet_days, value['DATE_ACQUIRED'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
 
