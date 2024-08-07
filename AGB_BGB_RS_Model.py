@@ -75,11 +75,14 @@ def maskCloud(image):
     return image.updateMask(cloud_mask)
 
 
-def maskSnow(image):
-    qa = image.select('QA')
-    snow = qa.bitwiseAnd(1 << 5).eq(0)
-    return image.updateMask(snow)
-    
+# This is used to extract all band values and relevant attributes    
+def extract_band_values(image):
+    values = image.reduceRegion(reducer=ee.Reducer.first(), geometry=point, scale=30)
+    date = image.date().format('YYYY-MM-dd')
+    driver = image.get('SPACECRAFT_ID')
+    utm_zone = image.get('UTM_ZONE')
+    return ee.Feature(None, values).set('Date', date).set('Driver', driver).set('UTM', utm_zone)
+
 
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
 def calculate_time_difference(image):
@@ -87,60 +90,39 @@ def calculate_time_difference(image):
     return image.set('time_difference', time_difference)
 
 
-# add relevant indices (for filtering) explicitly to properties of landsat
-def addPropertyIndices(image):
-    evi = image.select('EVI')
-    ndsi = image.select('NDSI')
-    evi = evi.where(ndsi.gt(0.2), 0)
-    image = image.addBands(evi, overwrite=True)
-
-    evi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('EVI')
-    ndsi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDSI')
-    ndwi = image.reduceRegion(ee.Reducer.mean(), point, 30).get('NDWI')
-    return image.set({'EVI_value': evi, 'NDSI_value': ndsi, 'NDWI_value': ndwi})
-
-
 # get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def getPeakBandValues(point, year, sortAscending=False):
-    spatial_filtered = landsat[year].filterBounds(point).map(addPropertyIndices)
+    spatial_filtered = landsat[year].filterBounds(point).map(maskCloud)
     
-    snow = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDSI_value', 0)))
-    snow_dates = snow.aggregate_array('system:time_start').getInfo()
-    if snow_dates:
-        no_snow_days =  round(pd.to_timedelta(max(snow_dates) - min(snow_dates), unit='ms')/pd.Timedelta(days=1))
-    else:
-        no_snow_days = 0
+    # extract all band values and drop NAs due to cloud masking
+    band_values = spatial_filtered.map(extract_band_values).getInfo()['features']
+    if not band_values:
+        return [{'Blue': None}, {'Blue': None}, 0, 0]
+    values = []
+    for feature in band_values:
+        values.append(feature['properties'])
+    df = pd.DataFrame(values)
+    df['Date'] = pd.to_datetime(df['Date'])
+    # drop duplicate dates (order of preservation is landsat 9, then 8, then 7)
+    df.drop_duplicates(subset='Date', inplace=True)
+    df.dropna(inplace=True)
     
-    water = spatial_filtered.filter(ee.Filter.And(ee.Filter.gt('NDWI_value', 0.5)))
-    wet_dates = water.aggregate_array('system:time_start').getInfo()
-    if wet_dates:
-        no_wet_days =  round(pd.to_timedelta(max(wet_dates) - min(wet_dates), unit='ms')/pd.Timedelta(days=1))
-    else:
-        no_wet_days = 0
+    # Set the 'date' column as the index, re-index and linearly interpolate bands at daily frequency
+    df_daily = df.set_index('Date')
+    date_range = pd.date_range(start=str(int(year)-1)+"-10-01", end=year+"-10-01", freq='D')[:-1]
+    df_daily = df_daily.reindex(date_range).interpolate(method='linear').drop(['Driver', 'UTM'], axis=1)
     
-    spatial_filtered = spatial_filtered.map(maskCloud)
-    clearImages = spatial_filtered.map(maskSnow)
-    integrals = clearImages.sum().divide(spatial_filtered.sum()).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    sorted_collection = spatial_filtered.map(maskSnow).sort('EVI_value', sortAscending)
-    
-    noImages = sorted_collection.size().getInfo()
-    if not noImages:
-        return [{'Blue': None}, {'Blue': None}, 0, 0, None, None, None]
-    
-    image_list = sorted_collection.toList(sorted_collection.size())
-    nImage, band_values = 0, {'Blue': None}
-    
-    # repeatedly check for cloud free pixels (non-null value)
-    while not band_values['Blue'] and nImage < noImages:
-        nearest_image = ee.Image(image_list.get(nImage))
-        nImage += 1
-        band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    
-    if not band_values['Blue']:
-        return [{'Blue': None}, {'Blue': None}, 0, 0, None, None, None]
-    value = nearest_image.getInfo()['properties']
-     
-    return [band_values, integrals, no_snow_days, no_wet_days, value['DATE_ACQUIRED'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
+    # sort by EVI to get band values at peak EVI date, and compute integrals for growing season (when NDSI <= 0.2)
+    df['Date'] = df['Date'].dt.strftime("%Y-%m-%d")
+    band_values = df.sort_values('EVI', ascending=False, ignore_index=True).loc[0,:]
+    df_daily.dropna(inplace=True)
+    integrals = df_daily[df_daily.NDSI <= 0.2]
+    # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5)
+    no_snow_days = len(date_range) - integrals.shape[0]
+    no_wet_days = len(date_range) - df_daily[df_daily.NDWI <= 0.5].shape[0]
+    integrals = integrals.sum()
+
+    return [band_values, integrals, no_snow_days, no_wet_days]
 
 
 # merge landsat, then extract unique years and create a dictionary of landsat data for each year
@@ -165,7 +147,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year = target_date[:4]
-    band_values, integrals, snow_days, wet_days, peak_day, vxn, mycrs = getPeakBandValues(point, year)
+    band_values, integrals, snow_days, wet_days = getPeakBandValues(point, year)
     
     if not band_values['Blue']:
         data.drop(idx, inplace=True)
@@ -173,10 +155,11 @@ for idx in range(data.shape[0]):
         continue
     
     if not integrals['Blue']:
-        for band in integrals:
+        for band in integrals.index:
             integrals[band] = 0
     
     # compute mean annual precipitation from gridmet (resolution = 4,638.3m) and SWE from daymetv4 (1km resolution)
+    mycrs = 'EPSG:326' + str(band_values['UTM'])
     gridmet_filtered = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
     mean_pr = gridmet_filtered.reproject(crs=mycrs, scale=30).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['pr']
     daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
@@ -226,8 +209,8 @@ for idx in range(data.shape[0]):
     elevation.append(elev)
     slope.append(slope_value)
     swe.append(swe_value)
-    peak_dates.append(peak_day)
-    driver.append(vxn)
+    peak_dates.append(band_values['Date'])
+    driver.append(band_values['Driver'])
     
     if idx%50 == 0: print(idx, end=' ')
 
@@ -296,10 +279,10 @@ cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
-data['ID'].value_counts()
+# data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['peak_date', 'Driver', 'NDSI']]
+var_col = [c for c in cols[9:] if c not in ['peak_date', 'Driver', 'NDSI', 'dNDSI']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -397,10 +380,10 @@ cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
-data['ID'].value_counts()
+# data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['peak_date', 'Driver', 'NDSI']]
+var_col = [c for c in cols[7:] if c not in ['peak_date', 'Driver', 'NDSI', 'dNDSI']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
