@@ -84,12 +84,6 @@ def extract_band_values(image):
     return ee.Feature(None, values).set('Date', date).set('Driver', driver).set('UTM', utm_zone)
 
 
-# Calculates absolute time difference (in days) from a target date, in which the images are acquired
-def calculate_time_difference(image):
-    time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
-    return image.set('time_difference', time_difference)
-
-
 # get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def getPeakBandValues(point, year, sortAscending=False):
     spatial_filtered = landsat[year].filterBounds(point).map(maskCloud)
@@ -110,16 +104,17 @@ def getPeakBandValues(point, year, sortAscending=False):
     # Set the 'date' column as the index, re-index and linearly interpolate bands at daily frequency
     df_daily = df.set_index('Date')
     date_range = pd.date_range(start=str(int(year)-1)+"-10-01", end=year+"-10-01", freq='D')[:-1]
-    df_daily = df_daily.reindex(date_range).interpolate(method='linear').drop(['Driver', 'UTM'], axis=1)
+    df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill().drop(['Driver', 'UTM'], axis=1)
     
     # sort by EVI to get band values at peak EVI date, and compute integrals for growing season (when NDSI <= 0.2)
     df['Date'] = df['Date'].dt.strftime("%Y-%m-%d")
+    df.loc[df['NDSI'] > 0.2, 'EVI'] = 0
     band_values = df.sort_values('EVI', ascending=False, ignore_index=True).loc[0,:]
     df_daily.dropna(inplace=True)
     integrals = df_daily[df_daily.NDSI <= 0.2]
     # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5)
     no_snow_days = len(date_range) - integrals.shape[0]
-    no_wet_days = len(date_range) - df_daily[df_daily.NDWI <= 0.5].shape[0]
+    no_wet_days = df_daily[df_daily.NDWI > 0.5].shape[0]
     integrals = integrals.sum()
 
     return [band_values, integrals, no_snow_days, no_wet_days]
@@ -309,7 +304,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=4, n_estimators=125, subsample=0.9,
+bgb_model = GradientBoostingRegressor(learning_rate=0.35, max_depth=11, n_estimators=25, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
@@ -354,7 +349,6 @@ def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
-plotFeatureImportance()
 
 def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
@@ -368,6 +362,8 @@ def plotY():
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
     plt.legend()
+
+plotFeatureImportance()
 plotY()
 
 
@@ -409,7 +405,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=7, n_estimators=50, subsample=1,
+agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=12, n_estimators=25, subsample=0.7,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
@@ -454,7 +450,6 @@ def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
-plotFeatureImportance()
 
 def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
@@ -468,6 +463,8 @@ def plotY():
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
     plt.legend()
+
+plotFeatureImportance()
 plotY()
 
 
