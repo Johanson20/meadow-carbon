@@ -289,6 +289,9 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
+# drop highest 3 values of y_field (outliers)
+outlierIds = data.sort_values(y_field, ascending=False)[:3].index
+data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
@@ -304,7 +307,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.35, max_depth=11, n_estimators=25, subsample=0.9,
+bgb_model = GradientBoostingRegressor(learning_rate=0.35, max_depth=9, n_estimators=50, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 bgb_model.fit(X_train, y_train)
@@ -405,7 +408,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=12, n_estimators=25, subsample=0.7,
+agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=14, n_estimators=50, subsample=0.6,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=48)
 agb_model.fit(X_train, y_train)
