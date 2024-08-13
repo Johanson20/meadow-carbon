@@ -22,7 +22,6 @@ import rioxarray as xr
 
 mydir = "Code"
 os.chdir(mydir)
-pd.set_option("display.precision", 16)
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
@@ -55,7 +54,7 @@ dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation',
-        'Date', 'Flow', 'Elevation', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+        'Date', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -92,7 +91,7 @@ def geotiffToCsv(input_raster, bandnames, crs):
         out_csv[bandnames[col-1]] = values
     
     # repeat the other columns throughout length of dataframe
-    for col in range(11, 15):
+    for col in range(11, 14):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -147,9 +146,8 @@ def processMeadow(meadowId):
     mycrs = 'EPSG:326' + str(image_result['crs'][0])
     noImages = len(dates)
     
-    # clip flow, elevation and slope to meadow's bounds
+    # clip flow and slope to meadow's bounds
     flow_band = flow_acc.clip(shapefile_bbox)
-    dem_bands = dem.clip(shapefile_bbox)
     slopeDem = slope.clip(shapefile_bbox)
     daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(str(year)+'-04-01', str(year)+'-04-02').first()
     
@@ -158,7 +156,7 @@ def processMeadow(meadowId):
     df = pd.DataFrame()
     combined_image = None
     var_col = []
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'elevation', 'slope', 'swe']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
@@ -176,9 +174,8 @@ def processMeadow(meadowId):
         if idx == 0:     # only extract once for the same meadow
             daymet_swe = daymetv4.resample('bilinear').toFloat()
             flow_30m = flow_band.resample('bilinear').toFloat()
-            dem_30m = dem_bands.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
-            combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, dem_30m, slope_30m, daymet_swe])
+            combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
         else:
             combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
             bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands

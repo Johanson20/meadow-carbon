@@ -16,13 +16,13 @@ parameters = {'learning_rate': [0.01,0.03,0.07,0.1,0.13,0.16,0.2,0.25,0.3,0.35],
 hypertune = {'RMSE': [float('Inf')], 'BIAS': [float('Inf')]}
 count = 0
 
-for sub in parameters['subsample']:
-    for alpha in parameters['learning_rate']:
+for alpha in parameters['learning_rate']:
+    for sub in parameters['subsample']:
         for n_est in parameters['n_estimators']:
             for depth in parameters['max_depth']:
                 gbm_model = GradientBoostingRegressor(learning_rate=alpha, max_depth=depth, n_estimators=n_est, subsample=sub,
                                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                                       random_state=48)
+                                                       random_state=10)
                 gbm_model.fit(X_train, y_train)
                 y_train_pred = gbm_model.predict(X_train)
                 y_test_pred = gbm_model.predict(X_test)

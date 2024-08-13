@@ -18,7 +18,6 @@ filename = "csv/Belowground Biomass_RS Model.csv"
 # filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
 data.head()
-data.drop('Unnamed: 0', axis=1, inplace=True)
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
@@ -277,7 +276,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['peak_date', 'Driver', 'NDSI', 'dNDSI']]
+var_col = [c for c in cols[9:] if c not in ['Elevation', 'peak_date', 'Driver', 'NDSI', 'dNDSI']]
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -306,10 +305,9 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-# defaults outperform these tuned values
-bgb_model = GradientBoostingRegressor(learning_rate=0.35, max_depth=9, n_estimators=50, subsample=0.9,
+bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=10, n_estimators=125, subsample=0.4,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=48)
+                                       verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 len(bgb_model.estimators_)  # number of trees used in estimation
 
@@ -382,7 +380,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['peak_date', 'Driver', 'NDSI', 'dNDSI']]
+var_col = [c for c in cols[7:] if c not in ['Elevation', 'peak_date', 'Driver', 'NDSI', 'dNDSI']]
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -408,9 +406,9 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=14, n_estimators=50, subsample=0.6,
+agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=9, n_estimators=100, subsample=0.8,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=48)
+                                       verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
 len(agb_model.estimators_)  # number of trees used in estimation
 
@@ -453,19 +451,6 @@ def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
-
-def plotY():
-    plt.scatter(y_test, y_test_pred, color='g')
-    plt.plot(y_test, y_pred, color='k', label='Regression line')
-    plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
-    plt.xlabel('Actual ' + y_field)
-    plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test) predictions")
-    # Make axes of equal extents
-    axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
-    plt.xlim((0, axes_lim))
-    plt.ylim((0, axes_lim))
-    plt.legend()
 
 plotFeatureImportance()
 plotY()

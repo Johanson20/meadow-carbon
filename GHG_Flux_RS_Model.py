@@ -149,6 +149,7 @@ data['NDWI'] = (data['NIR'] - data['SWIR_1'])/(data['NIR'] + data['SWIR_1'])
 data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5*data['Blue'] + 1)
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Blue']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Blue'])
+data['NDPI'] = (data['NIR'] - (0.56*data['Red'] + 0.44*data['SWIR_2']))/(data['NIR'] + 0.56*data['Red'] + 0.44*data['SWIR_2'])
 
 # drop unnamed column and display first 5 rows of updated dataframe
 data.head()
@@ -182,7 +183,7 @@ data.drop_duplicates(inplace=True)
 data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[8:] if c not in ['Driver', 'Days_of_data_acquisition_offset']]
+var_col = [c for c in cols[8:] if c not in ['Elevation', 'Driver', 'Days_of_data_acquisition_offset']]
 y_field = 'CO2.umol.m2.s'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -227,9 +228,9 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=10, n_estimators=750, subsample=1,
+ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=12, n_estimators=250, subsample=1,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=48)
+                                       verbose=1, random_state=10)
 ghg_model.fit(X_train, y_train)
 len(ghg_model.estimators_)  # number of trees used in estimation
 
@@ -272,7 +273,6 @@ def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(ghg_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
-plotFeatureImportance()
 
 def plotY():
     plt.scatter(y_test, y_test_pred, color='g')
@@ -286,4 +286,6 @@ def plotY():
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
     plt.legend()
+
+plotFeatureImportance()
 plotY()
