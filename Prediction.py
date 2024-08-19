@@ -37,7 +37,6 @@ utm_zone11 = gpd.read_file("files/CA_UTM11.shp")
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp")
 # zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection") # Repeat all for zone 10 (make changes)
 zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
-shapefile = None
 
 ncores = multiprocessing.cpu_count()
 year = 2021
@@ -99,6 +98,29 @@ def geotiffToCsv(input_raster, bandnames, crs):
     return out_csv
 
 
+def processGeotiffCsv(df):
+    nullIds =  list(np.where(df['tmmx'].isnull())[0])
+    df.drop(nullIds, inplace = True)
+    df.reset_index(drop=True, inplace=True)
+    
+    # temporary dataframe for each iteration to be appended to the overall dataframe
+    df.columns = cols[:-7]
+    df['Date'] = pd.to_timedelta(df['Date'], unit='s') + pd.to_datetime('1970-01-01')
+    df['Date'] = pd.to_datetime(df['Date'].dt.strftime('%Y-%m-%d'))
+    df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
+    df['NDWI'] = (df['NIR'] - df['SWIR_1'])/(df['NIR'] + df['SWIR_1'])
+    df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
+    df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
+    df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
+    df['NDPI'] = (df['NIR'] - (0.56*df['Red'] + 0.44*df['SWIR_2']))/(df['NIR'] + 0.56*df['Red'] + 0.44*df['SWIR_2'])
+    df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
+    NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
+    
+    return df[~NA_Ids]
+
+
 def interpolate_group(group):
     group.drop_duplicates(subset='Date', inplace=True)
     group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
@@ -109,6 +131,7 @@ def interpolate_group(group):
     group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
+    group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
     
     return group
 
@@ -122,10 +145,10 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 # zone11_meadows['Buffer'] = zone11_meadows.to_crs(32611).geometry.buffer(-30)
 # zone11_meadows = zone11_meadows[~zone11_meadows.Buffer.is_empty]
 # zone11_meadows.reset_index(drop=True, inplace=True)
-zone10_meadows['Buffer'] = zone10_meadows.to_crs(32611).geometry.buffer(-30)
+zone10_meadows['Buffer'] = zone10_meadows.to_crs(32610).geometry.buffer(-30)
 zone10_meadows = zone10_meadows[~zone10_meadows.Buffer.is_empty]
 zone10_meadows.reset_index(drop=True, inplace=True)
-allIds = zone10_meadows.index   # [54, 96, 1299, 773, 3482, 1024, 1143, 1041, 3465]
+allIds = zone10_meadows.index   # [54, 773, 3482, 55, 3493, 96, 1102, 1318, 927, 1022, 1144, 1044, 3462]
 
 
 def processMeadow(meadowId):
@@ -142,6 +165,8 @@ def processMeadow(meadowId):
     landsat_images = landsat_collection.filterBounds(shapefile_bbox)
     image_list = landsat_images.toList(landsat_images.size())
     image_result = ee.Dictionary({'crs': landsat_images.aggregate_array('UTM_ZONE'), 'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
+    if not image_result['crs']:
+        return
     dates = [date/1000 for date in image_result['image_dates']]
     mycrs = 'EPSG:326' + str(image_result['crs'][0])
     noImages = len(dates)
@@ -153,8 +178,8 @@ def processMeadow(meadowId):
     
     # dataframe to store results for each meadow
     all_data = pd.DataFrame(columns=cols)
-    df = pd.DataFrame()
-    combined_image = None
+    df, df1 = pd.DataFrame(), pd.DataFrame()
+    combined_image, residue_image = None, None
     var_col = []
     bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
@@ -176,9 +201,14 @@ def processMeadow(meadowId):
             flow_30m = flow_band.resample('bilinear').toFloat()
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
             combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
+            if noImages > 100:
+                residue_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
         else:
-            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
             bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
+            if len(bandnames) < 1024:
+                combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
+            else:
+                residue_image = residue_image.addBands([landsat_image, gridmet_30m, date_band])
         print(idx, end=' ')
         
     if feature.Area_km2 > 15:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
@@ -199,10 +229,16 @@ def processMeadow(meadowId):
     # some subregions of small meadows are still large
     else:
         image_name = f'files/meadow_{meadowId}_0.tif'
+        extra_image_name = f'files/meadow_{meadowId}_0_1.tif'
         subregion = shapefile_bbox
+        
         with contextlib.redirect_stdout(None):
             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
+            if len(bandnames) >= 1024:
+                geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, region=subregion, crs=mycrs)
         
+        if os.path.exists(extra_image_name):
+            df1 = geotiffToCsv(extra_image_name, bandnames, mycrs)
         if os.path.exists(image_name):
             df = geotiffToCsv(image_name, bandnames, mycrs)
         else:
@@ -220,57 +256,49 @@ def processMeadow(meadowId):
                     if subarea.intersects(feature.geometry):
                         subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                         subregions.append(subregion.intersection(shapefile_bbox))
-        
+    
+    processedDf1 = df1.empty
     for i, subregion in enumerate(subregions):
         if df.empty:
-            temp_image = combined_image.clip(subregion)
             image_name = f'files/meadow_{meadowId}_{i}.tif'
+            extra_image_name = f'files/meadow_{meadowId}_{i}_1.tif'
         
             # suppress output of downloaded images (image limit = 48 MB)
             with contextlib.redirect_stdout(None):
-                geemap.ee_export_image(temp_image, filename=image_name, scale=30, region=subregion, crs=mycrs)
+                geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
+                if len(bandnames) >= 1024 and df1.empty:
+                    geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, region=subregion, crs=mycrs)
             try:
                 df = geotiffToCsv(image_name, bandnames, mycrs)
+                if os.path.exists(extra_image_name):
+                    df1 = geotiffToCsv(extra_image_name, bandnames, mycrs)
             except:
                 continue
-        nullIds =  list(np.where(df['tmmx'].isnull())[0])
-        df.drop(nullIds, inplace = True)
-        df.reset_index(drop=True, inplace=True)
-        
-        # temporary dataframe for each iteration to be appended to the overall dataframe
-        df.columns = cols[:-7]
-        df['Date'] = pd.to_timedelta(df['Date'], unit='s') + pd.to_datetime('1970-01-01')
-        df['Date'] = pd.to_datetime(df['Date'].dt.strftime('%Y-%m-%d'))
-        df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
-        df['NDWI'] = (df['NIR'] - df['SWIR_1'])/(df['NIR'] + df['SWIR_1'])
-        df['EVI'] = 2.5*(df['NIR'] - df['Red'])/(df['NIR'] + 6*df['Red'] - 7.5*df['Blue'] + 1)
-        df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
-        df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
-        df['NDPI'] = (df['NIR'] - (0.56*df['Red'] + 0.44*df['SWIR_2']))/(df['NIR'] + 0.56*df['Red'] + 0.44*df['SWIR_2'])
-        df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
-        df.dropna(inplace=True)
-        NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
-        df = df[~NA_Ids]
+        df = processGeotiffCsv(df)
         all_data = pd.concat([all_data, df])
+        if not processedDf1:
+            df1 = processGeotiffCsv(df1)
+            all_data = pd.concat([all_data, df1])
+            processedDf1 = True
         df = pd.DataFrame()
     print("\nBand data extraction done!")    
     all_data.head()
     
     if not all_data.empty:
+        # select relevant columns, predict GHG and interpolate daily values
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
-        # select relevant columns and fix order of columns for ML models
         var_col = list(ghg_model.feature_names_in_)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col])
-        
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
+
+        # Predict AGB/BGB per pixel using integrals
+        uniquePts = all_data.groupby(['X', 'Y'])
         var_col = list(agb_model.feature_names_in_)
-        
-        # Predict AGB/BGB using max EVI per pixel (reshaping of values is needed for a single row's prediction)
-        max_EVI_Ids = all_data.groupby(['X', 'Y'])['EVI'].idxmax()
+        max_Ids = uniquePts.head(1).index
         agb_bgb = pd.DataFrame()
-        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_EVI_Ids, var_col])
-        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_EVI_Ids, var_col])
+        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_Ids, var_col])
+        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_Ids, var_col])
         
         # Turn negative AGB/BGB to zero and interpolate GHG    
         agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
@@ -278,7 +306,6 @@ def processMeadow(meadowId):
         agb_bgb.describe()
         print("Predictions and interpolations done!")
         
-        uniquePts = all_data.groupby(['X', 'Y'])
         utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
         res = 30
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
@@ -296,5 +323,6 @@ def processMeadow(meadowId):
     print(datetime.now() - start)
 
 
-# processMeadow(3496)   # 3465 (largest), 54 (smallest)
-Parallel(n_jobs=ncores-2)(delayed(processMeadow)(meadowId) for meadowId in allIds)
+# processMeadow(3496)   # 3462 (largest), 54 (smallest)
+Parallel(n_jobs=ncores-2,prefer="threads")(delayed(processMeadow)(meadowId) for meadowId in allIds)
+shapefile = None

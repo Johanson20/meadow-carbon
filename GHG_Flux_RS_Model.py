@@ -280,7 +280,7 @@ def plotY():
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test) predictions")
+    plt.title("Test set (y_test)")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))

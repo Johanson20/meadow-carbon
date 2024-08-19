@@ -276,7 +276,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[9:] if c not in ['Elevation', 'peak_date', 'Driver', 'NDSI', 'dNDSI']]
+var_col =  ['Flow', 'Slope'] + list(cols[27:-2]) + ['dNDPI']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -305,7 +305,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=10, n_estimators=125, subsample=0.4,
+bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=50, subsample=0.6,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
@@ -357,7 +357,7 @@ def plotY():
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test) predictions")
+    plt.title("Test set (y_test)")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
@@ -380,7 +380,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[7:] if c not in ['Elevation', 'peak_date', 'Driver', 'NDSI', 'dNDSI']]
+var_col = ['Flow', 'Slope'] + list(cols[25:-2]) + ['dNDPI']
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -406,7 +406,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=9, n_estimators=100, subsample=0.8,
+agb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=5, n_estimators=25, subsample=0.8,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)

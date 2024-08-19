@@ -5,7 +5,6 @@ Created on Tue May 21 15:55:04 2024
 @author: jonyegbula
 """
 
-import statistics
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
@@ -13,7 +12,7 @@ from sklearn.metrics import mean_squared_error
 parameters = {'learning_rate': [0.01,0.03,0.07,0.1,0.13,0.16,0.2,0.25,0.3,0.35], 'subsample': [x/100 for x in range(30, 101, 10)],
              'n_estimators': [25,50,75,100,125,150,200,250,500,750,1000], 'max_depth': range(3,15)}
 
-hypertune = {'RMSE': [float('Inf')], 'BIAS': [float('Inf')]}
+hypertune = {'Mean_RMSE': [float('Inf')], 'Test_RMSE': [float('Inf')]}
 count = 0
 
 for alpha in parameters['learning_rate']:
@@ -29,19 +28,14 @@ for alpha in parameters['learning_rate']:
                 
                 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
                 val = (y_train_pred - y_train) / y_train
-                train_p_bias = abs(np.mean(val[np.isfinite(val)]) * 100)
-                
                 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
                 val = (y_test_pred - y_test) / y_test
-                test_p_bias = abs(np.mean(val[np.isfinite(val)]) * 100)
+                mean_rmse = np.mean(train_rmse, test_rmse)
                 
-                mean_rmse = round(statistics.harmonic_mean([train_rmse, test_rmse]), 5)
-                mean_bias = round(statistics.harmonic_mean([train_p_bias, test_p_bias]), 5)
-                
-                if mean_rmse < hypertune['RMSE'][0]:
-                    hypertune['RMSE'] = [mean_rmse, alpha, n_est, sub, depth, 0.2]
-                if mean_bias < hypertune['BIAS'][0]:
-                    hypertune['BIAS'] = [mean_bias, alpha, n_est, sub, depth, 0.2]
+                if mean_rmse < hypertune['Mean_RMSE'][0]:
+                    hypertune['Mean_RMSE'] = [mean_rmse, alpha, n_est, sub, depth, 0.2]
+                if test_rmse < hypertune['Test_RMSE'][0]:
+                    hypertune['Test_RMSE'] = [test_rmse, alpha, n_est, sub, depth, 0.2]
                 
                 count += 1
                 if count%100 == 0:
