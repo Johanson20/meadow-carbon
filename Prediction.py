@@ -27,14 +27,11 @@ os.chdir(mydir)
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
 
-# read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp")
-#verify CRS or convert to WGS '84
-shapefile.crs
+# read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = shapefile.to_crs(epsg_crs)
-utm_zone11 = gpd.read_file("files/CA_UTM11.shp")
-utm_zone10 = gpd.read_file("files/CA_UTM10.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
+utm_zone11 = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs)
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 # zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection") # Repeat all for zone 10 (make changes)
 zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
 
@@ -211,9 +208,9 @@ def processMeadow(meadowId):
                 residue_image = residue_image.addBands([landsat_image, gridmet_30m, date_band])
         print(idx, end=' ')
         
-    if feature.Area_km2 > 15:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
+    if feature.Area_km2 > 5:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/5))
+        num_subregions = round(np.sqrt(feature.Area_km2/2))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = []
@@ -229,12 +226,12 @@ def processMeadow(meadowId):
     # some subregions of small meadows are still large
     else:
         image_name = f'files/meadow_{meadowId}_0.tif'
-        extra_image_name = f'files/meadow_{meadowId}_0_1.tif'
+        extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
         subregion = shapefile_bbox
         
         with contextlib.redirect_stdout(None):
             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
-            if len(bandnames) >= 1024:
+            if len(bandnames) >= 1024:  # geemap can download at most 1024 bands
                 geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, region=subregion, crs=mycrs)
         
         if os.path.exists(extra_image_name):
@@ -261,7 +258,7 @@ def processMeadow(meadowId):
     for i, subregion in enumerate(subregions):
         if df.empty:
             image_name = f'files/meadow_{meadowId}_{i}.tif'
-            extra_image_name = f'files/meadow_{meadowId}_{i}_1.tif'
+            extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
         
             # suppress output of downloaded images (image limit = 48 MB)
             with contextlib.redirect_stdout(None):
@@ -276,10 +273,16 @@ def processMeadow(meadowId):
                 continue
         df = processGeotiffCsv(df)
         all_data = pd.concat([all_data, df])
+        # runs if all bands beyond 1024 are already processed
         if not processedDf1:
             df1 = processGeotiffCsv(df1)
             all_data = pd.concat([all_data, df1])
             processedDf1 = True
+            df1 = pd.DataFrame()
+        if not df1.empty:
+            df1 = processGeotiffCsv(df1)
+            all_data = pd.concat([all_data, df1])
+            df1 = pd.DataFrame()
         df = pd.DataFrame()
     print("\nBand data extraction done!")    
     all_data.head()
