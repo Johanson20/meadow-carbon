@@ -133,16 +133,15 @@ f.close()
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
-epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
-utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
-zone10_meadows, mycrs = gpd.overlay(shapefile, utm_zone10, how="intersection"), 'EPSG:32610'
-zone10_meadows['Buffer'] = zone10_meadows.to_crs(mycrs).geometry.buffer(-30)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp")
+utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(shapefile.crs), "EPSG:32610"
+zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection").to_crs(mycrs)
+zone10_meadows['Buffer'] = zone10_meadows.geometry.buffer(-30)
 zone10_meadows = zone10_meadows[~zone10_meadows.Buffer.is_empty]
 zone10_meadows.reset_index(drop=True, inplace=True)
-# utm_zone11 = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs)
-# zone11_meadows, mycrs = gpd.overlay(shapefile, utm_zone11, how="intersection"), 'EPSG:32611' # Repeat all for zone 10 (make changes)
-# zone11_meadows['Buffer'] = zone11_meadows.to_crs(mycrs).geometry.buffer(-30)
+# utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(shapefile.crs), "EPSG:32611"
+# zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection").to_crs(mycrs)   # Repeat all for zone 10 (make changes)
+# zone11_meadows['Buffer'] = zone11_meadows.geometry.buffer(-30)
 # zone11_meadows = zone11_meadows[~zone11_meadows.Buffer.is_empty]
 # zone11_meadows.reset_index(drop=True, inplace=True)
 
