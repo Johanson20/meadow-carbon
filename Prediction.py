@@ -41,8 +41,7 @@ gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation',
-        'Date', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation', 'Date', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -133,17 +132,12 @@ f.close()
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp")
-utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(shapefile.crs), "EPSG:32610"
-zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection").to_crs(mycrs)
-zone10_meadows['Buffer'] = zone10_meadows.geometry.buffer(-30)
-zone10_meadows = zone10_meadows[~zone10_meadows.Buffer.is_empty]
-zone10_meadows.reset_index(drop=True, inplace=True)
-# utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(shapefile.crs), "EPSG:32611"
-# zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection").to_crs(mycrs)   # Repeat all for zone 10 (make changes)
-# zone11_meadows['Buffer'] = zone11_meadows.geometry.buffer(-30)
-# zone11_meadows = zone11_meadows[~zone11_meadows.Buffer.is_empty]
-# zone11_meadows.reset_index(drop=True, inplace=True)
+epsg_crs = "EPSG:4326"
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
+utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs), "EPSG:32610"
+zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
+# utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs), "EPSG:32611"
+# zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection")   # Repeat all for zone 10 (make changes)
 
 
 def processMeadow(meadowIdx):
@@ -163,6 +157,7 @@ def processMeadow(meadowIdx):
     dates = [date/1000 for date in image_result['image_dates']]
     noImages = len(dates)
     if not noImages:
+        print('meadowId = {}, at index: {} is too small for data extraction'.format(meadowId, meadowIdx))
         return
     
     # clip flow and slope to meadow's bounds
@@ -310,7 +305,7 @@ def processMeadow(meadowIdx):
         utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
         res = 30
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
-        out_rasters = {1: ['_AGB.tif', 'HerbBio.g.m2'], 2: ['_BGB.tif', 'Roots.kg.m2'], 3: ['_GHG.tif', 'CO2.umol.m2.s']}
+        out_rasters = {1: ['AGB.tif', 'HerbBio.g.m2'], 2: ['BGB.tif', 'Roots.kg.m2'], 3: ['GHG.tif', 'CO2.umol.m2.s']}
         for i in range(1,4):
             out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
             if i == 3:
@@ -321,11 +316,13 @@ def processMeadow(meadowIdx):
             gdf.plot(column=out_rasters[i][1], cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
+    else:
+        print('meadowId = {}, at index: {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
     print(datetime.now() - start)
 
 
-# processMeadow(96)   # 3462 (largest), 54 (smallest)
-allIds = list(range(2000, 2500))    # zone10_meadows.index   # [54, 773, 3482, 55, 3493, 96, 1102, 1318, 927, 1022, 1144, 1044, 3462]
+# processMeadow(0)   # 4614 (largest), 4569 (smallest) for zone 10
+allIds = list(range(2000, 2500))    # zone10_meadows.index   # [4569, 6, 1, 22, 4234, 4609, 27, 1048, 935, 1233, 1373, 1255, 4614]
 with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
     parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIds)
 
