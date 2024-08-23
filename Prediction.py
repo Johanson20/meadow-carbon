@@ -131,16 +131,22 @@ def processGeotiff(df):
     return df[~NA_Ids]
 
 
-def interpolate_group(group):
-    group.drop_duplicates(subset='Date', inplace=True)
-    group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
+def interpolate_group(group, flag):
+    scale = 1
+    if flag < 2e6:     # processes meadows with less than 2 million rows
+        group.drop_duplicates(subset='Date', inplace=True)
+        group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
+    else:   # for huge meadows, don't interpolate daily but multiply by mean landsat periodicity
+        scale = len(date_range)/group.shape[0]
+    
     group['Mean_Precipitation'] = group['Mean_Precipitation'].mean()
     integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
     group.loc[group['NDSI'] > 0.2, 'EVI'] = 0
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
     for integral in integrals.keys():
-        group['d'+integral] = integrals[integral]
+        group['d'+integral] = integrals[integral]*scale
+    group['CO2.umol.m2.s'] *= scale 
     group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
     
     return group
@@ -246,8 +252,8 @@ def processMeadow(meadowIdx):
             geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[6:-4], folder="files", crs=mycrs, region=subregion, scale=30)
     
     tasks = ee.batch.Task.list()
-    all_images = ["files/" + imagename + ".tif" for imagename in image_names]
-    for image_name in all_images:    # read in each downloaded image, process and stack them into a dataframe
+    while image_names:    # read in each downloaded image, process and stack them into a dataframe
+        image_name = ["files/" + imagename + ".tif" for imagename in image_names][0]
         if not os.path.exists(image_name):
             isOngoing = True
             filename = None
@@ -256,7 +262,6 @@ def processMeadow(meadowIdx):
                     if task.status()['description'] in image_names:
                         if task.status()['state'] == 'COMPLETED':
                             filename = task.status()['description']
-                            image_names.remove(filename)
                             isOngoing = False
                             break
                         elif task.status()['state'] == 'FAILED':
@@ -269,6 +274,7 @@ def processMeadow(meadowIdx):
                     image_name = "files/" + filename + ".tif"
                     file.GetContentFile(image_name)
         try:
+            image_names.remove(image_name[6:-4])
             df = geotiffToCsv(image_name, bandnames)
         except:
             continue
@@ -283,7 +289,8 @@ def processMeadow(meadowIdx):
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
-        all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
+        dfSize = all_data.shape[0]
+        all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group, flag=dfSize).reset_index(drop=True)
 
         # Predict AGB/BGB per pixel using integrals
         uniquePts = all_data.groupby(['X', 'Y'])
