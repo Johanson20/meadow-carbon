@@ -150,6 +150,7 @@ def interpolate_group(group):
 f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
+ghg_col, agb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_)
 
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
@@ -190,7 +191,6 @@ def processMeadow(meadowIdx):
     all_data = pd.DataFrame(columns=cols)
     df = pd.DataFrame()
     combined_image = None
-    var_col = []
     image_names = set()
     bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
@@ -246,23 +246,28 @@ def processMeadow(meadowIdx):
             geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[6:-4], folder="files", crs=mycrs, region=subregion, scale=30)
     
     tasks = ee.batch.Task.list()
-    for count in range(len(subregions)):    # read in each downloaded image, process and stack them into a dataframe
-        isOngoing = True
-        filename, image_name = None, None
-        while isOngoing:
-            for task in tasks:
-                if task.status()['description'] in image_names and task.status()['state'] == 'COMPLETED':
-                    filename = task.status()['description']
-                    image_names.remove(filename)
-                    isOngoing = False
-                    break
-                else:
-                    time.sleep(1)
-        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
-        for file in file_list:
-            if file['title'] == filename + ".tif":
-                image_name = "files/" + filename + ".tif"
-                file.GetContentFile(image_name)
+    all_images = ["files/" + imagename + ".tif" for imagename in image_names]
+    for image_name in all_images:    # read in each downloaded image, process and stack them into a dataframe
+        if not os.path.exists(image_name):
+            isOngoing = True
+            filename = None
+            while isOngoing:
+                for task in tasks:
+                    if task.status()['description'] in image_names:
+                        if task.status()['state'] == 'COMPLETED':
+                            filename = task.status()['description']
+                            image_names.remove(filename)
+                            isOngoing = False
+                            break
+                        elif task.status()['state'] == 'FAILED':
+                            break
+                        else:
+                            time.sleep(1)
+            file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
+            for file in file_list:
+                if file['title'] == filename + ".tif":
+                    image_name = "files/" + filename + ".tif"
+                    file.GetContentFile(image_name)
         try:
             df = geotiffToCsv(image_name, bandnames)
         except:
@@ -277,17 +282,15 @@ def processMeadow(meadowIdx):
         # select relevant columns, predict GHG and interpolate daily values
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
-        var_col = list(ghg_model.feature_names_in_)
-        all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, var_col])
+        all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
 
         # Predict AGB/BGB per pixel using integrals
         uniquePts = all_data.groupby(['X', 'Y'])
-        var_col = list(agb_model.feature_names_in_)
         max_Ids = uniquePts.head(1).index
         agb_bgb = pd.DataFrame()
-        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_Ids, var_col])
-        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_Ids, var_col])
+        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_Ids, agb_col])
+        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_Ids, agb_col])
         
         # Turn negative AGB/BGB to zero and interpolate GHG    
         agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
