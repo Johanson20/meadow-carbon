@@ -5,13 +5,22 @@ Created on Tue Aug 20 15:45:06 2024
 @author: jonyegbula
 """
 
+import os
+import pandas as pd
 import geopandas as gpd
-from geocube.api.core import make_geocube
-import geemap
 import rioxarray as xr
+import contextlib
+import ee
+import geemap
+from shapely.geometry import Polygon
+from osgeo import gdal, osr
+from geocube.api.core import make_geocube
 
 
 def GeotiffFromGEEImage(GEE_image, bounding_box, geotiffname, bandnames, epsg, res=30):
+    '''
+    Creates a single geotiff file of all "bandnames" in a constrained GEE image and plots a raster of each band. Supply constrained image like clipped flow accumulation, filtered gridmet/landsat, etc. and also the ee.Geometry region it was clipped to. Include epsg code of region, spatial resolution in meters, a list of valid bandnames in the image, as well as the raster's name
+    '''
     myImage = GEE_image.select(bandnames)
     geemap.ee_export_image(myImage, filename=geotiffname, scale=res, region=bounding_box, crs='EPSG:'+epsg)
     geotiff = xr.open_rasterio(geotiffname)
@@ -26,10 +35,13 @@ def GeotiffFromGEEImage(GEE_image, bounding_box, geotiffname, bandnames, epsg, r
     for band in bandnames:
         gdf.plot(column=band, cmap='viridis', legend=True)
 
-# GeotiffFromGEEImage(landsat8_collection.filterBounds(shapefile_bbox).first(), shapefile_bbox, "files/landsat.tif", ['SR_B2', 'SR_B5'], '32610')
+# GeotiffFromGEEImage(gridmet.filterBounds(shapefile_bbox).first(), shapefile_bbox, "files/landsat.tif", ['SR_B2', 'SR_B5'], '32610')
 
 
 def downloadBands(banded_image, image_name, region, mycrs, scale=30):
+    '''
+    Split an area (if it's too large to download singly) into 4 subareas and download the bands as a geotiff, then download subareas.
+    '''
     with contextlib.redirect_stdout(None):
         geemap.ee_export_image(banded_image.clip(region), filename=image_name, scale=30, region=region, crs=mycrs)
     
@@ -48,18 +60,18 @@ def downloadBands(banded_image, image_name, region, mycrs, scale=30):
                                    (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
                                    (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
                 if subarea.intersects(region.geometry):
-                    subregion = ee.Geometry.Rectangle(list(subarea.bounds)).intersection(shapefile_bbox)
+                    subregion = ee.Geometry.Rectangle(list(subarea.bounds)).intersection(region)
                     new_name = f'{image_name.split(".tif")[0]}_{count}.tif'
                     downloadBands(banded_image, new_name, subregion, mycrs, scale=30)
 
+# downloadBands(combined_image, "meadow_2021_16696_4614_0.tif", shapefile_bbox, "EPSG:32610")
 
-def geotiffToCsv(folderPath, input_raster, csvfile, jsonBands=""):
-    pd.set_option("display.precision", 20)
+
+def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4269):
+    '''
+    Convert geotiff to raster and make coordinates in latlon from projected, supply epsg code of projection
+    '''
     geotiff = gdal.Open(input_raster)
-    if jsonBands:
-        jsonBands = jsonBands[1:-1].split(",")
-    
-    bandNo = 0
     nBands = geotiff.RasterCount
     out_csv = pd.DataFrame(columns=range(nBands))
     bandnames = []
@@ -70,11 +82,7 @@ def geotiffToCsv(folderPath, input_raster, csvfile, jsonBands=""):
         for value in bandValues:
             values.extend(value)
         
-        if jsonBands and bandNo < len(jsonBands) and jsonBands[bandNo].split(":")[0].strip() == str(band):
-            bandnames.append(jsonBands[bandNo].split(":")[1].strip())
-            bandNo += 1
-        else:
-            bandnames.append(geotiff.GetRasterBand(band).GetDescription())
+        bandnames.append(geotiff.GetRasterBand(band).GetDescription())
         out_csv.iloc[:, band-1] = values
     out_csv.columns = bandnames
     
@@ -92,7 +100,7 @@ def geotiffToCsv(folderPath, input_raster, csvfile, jsonBands=""):
     mycrs = osr.SpatialReference()
     mycrs.ImportFromProj4(geotiff.GetProjection())
     target_crs = osr.SpatialReference()
-    target_crs.ImportFromEPSG(4269)  # WGS84
+    target_crs.ImportFromEPSG(epsg)  # WGS84
     transform = osr.CoordinateTransformation(mycrs, target_crs)
     points = [(x, y) for x, y in zip(x_geo, y_geo)]
     coords = transform.TransformPoints(points)
@@ -100,3 +108,5 @@ def geotiffToCsv(folderPath, input_raster, csvfile, jsonBands=""):
     out_csv['lat'] = [data[0] for data in coords]
     geotiff = None
     out_csv.to_csv(csvfile, encoding='utf-8', index=False)
+
+# geotiffToCsv("Treemap.tif", "out_xyz.csv", "", 32611)

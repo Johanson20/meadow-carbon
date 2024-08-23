@@ -6,26 +6,44 @@ Created on Mon Apr 22 11:03:25 2024
 """
 
 import os
+import time
 import ee
 import numpy as np
 import pickle
 import pandas as pd
 import geopandas as gpd
-from datetime import datetime, timedelta
-from geocube.api.core import make_geocube
-from joblib import Parallel, delayed
-from shapely.geometry import Polygon
 import geemap
 import multiprocessing
 import contextlib
 import rioxarray as xr
+from datetime import datetime, timedelta
+from geocube.api.core import make_geocube
+from joblib import Parallel, delayed
+from shapely.geometry import Polygon
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
 
 mydir = "R:\SCRATCH\jonyegbula\meadow-carbon"
 os.chdir(mydir)
+folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in url
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
+
+# Authenticate and create the PyDrive client for google drive access
+gauth = GoogleAuth()
+# gauth.CommandLineAuth()  # Creates local webserver and auto handles authentication (only do it once).
+gauth.LoadCredentialsFile("mycreds.txt")
+if gauth.credentials is None:   # Authenticate if there are no valid credentials
+    gauth.CommandLineAuth()
+elif gauth.access_token_expired:    # Refresh the credentials if they are expired
+    gauth.Refresh()
+else:   # Load the existing credentials
+    gauth.Authorize()
+# Save the credentials for the next run
+gauth.SaveCredentialsFile("mycreds.txt")
+drive = GoogleDrive(gauth)
 
 ncores = multiprocessing.cpu_count()
 year = 2021
@@ -64,20 +82,24 @@ def geotiffToCsv(input_raster, bandnames):
     df = geotiff.to_dataframe(name='value').reset_index()
     df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
     geotiff.close()
-    nBands = df.shape[1] - 2
+    nrows = df.shape[0]
     
     out_csv = pd.DataFrame()
-    ncol = len(set(bandnames))
-    n = ((nBands - ncol)//10 + 1)
+    allBands = set(df.columns)
+    nBands = len(bandnames)
     
     # There are 10 (repeating) landsat, gridmet and constant value bands
     for col in range(1, 11):
         values = []
-        for band in [col] + list(range(ncol+col, nBands+1, 10)):
-            values = values + list(df[band])
+        for band in [col] + list(range(13+col, nBands+1, 10)):
+            if band in allBands:
+                values = values + list(df[band])
+            else:
+                values = values + [np.nan]*nrows
         out_csv[bandnames[col-1]] = values
     
     # repeat the other columns throughout length of dataframe
+    n = int(out_csv.shape[0]/nrows)
     for col in range(11, 14):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
@@ -86,7 +108,7 @@ def geotiffToCsv(input_raster, bandnames):
     return out_csv
 
 
-def processGeotiffCsv(df):
+def processGeotiff(df):
     nullIds =  list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
@@ -130,7 +152,6 @@ ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
-
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
@@ -167,9 +188,10 @@ def processMeadow(meadowIdx):
     
     # dataframe to store results for each meadow
     all_data = pd.DataFrame(columns=cols)
-    df, df1 = pd.DataFrame(), pd.DataFrame()
-    combined_image, residue_image = None, None
-    var_col, bandnames1 = [], []
+    df = pd.DataFrame()
+    combined_image = None
+    var_col = []
+    image_names = set()
     bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
@@ -181,30 +203,23 @@ def processMeadow(meadowIdx):
         date = datetime.strftime(start_date, '%Y-%m-%d')
         
         gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
-        gridmet_30m = gridmet_filtered.resample('bilinear')
-        date_band = ee.Image.constant(dates[idx]).rename('Date')
+        gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
+        date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
         
         # align other satellite data with landsat and make resolution uniform (30m)
-        if idx == 0:     # only extract once for the same meadow
+        if idx == 0:     # extract constant values once for the same meadow
             daymet_swe = daymetv4.resample('bilinear').toFloat()
             flow_30m = flow_band.resample('bilinear').toFloat()
-            slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear')
+            slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').toFloat()
             combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
-            if noImages > 100:
-                bandnames1 = bandnames.copy()
-                residue_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
         else:
-            if len(bandnames) < 1014:   # geemap can download at most 1024 (1014 + 10) bands
-                bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
-                combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
-            else:
-                bandnames1 = bandnames1.copy() + bandnames1[:10]
-                residue_image = residue_image.addBands([landsat_image, gridmet_30m, date_band])
+            bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
+            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
         print(idx, end=' ')
         
-    if feature.Area_km2 > 5:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
+    if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/2))
+        num_subregions = round(np.sqrt(feature.Area_km2/10))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = []
@@ -217,65 +232,43 @@ def processMeadow(meadowIdx):
                 if subarea.intersects(feature.geometry):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                     subregions.append(subregion.intersection(shapefile_bbox))    
-    else:    # some subregions of small meadows are still large
-        image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_0.tif'
-        extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
-        subregion = shapefile_bbox
-        
-        with contextlib.redirect_stdout(None):
-            geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
-            if len(bandnames1) > 13:
-                geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, region=subregion, crs=mycrs)
-        
-        if os.path.exists(extra_image_name):
-            df1 = geotiffToCsv(extra_image_name, bandnames1)
-        if os.path.exists(image_name):
-            df = geotiffToCsv(image_name, bandnames)
-        else:
-            xmin, ymin, xmax, ymax = feature.geometry.bounds
-            num_subregions = 2
-            subregion_width = (xmax - xmin) / num_subregions
-            subregion_height = (ymax - ymin) / num_subregions
-            subregions = []
-            for i in range(num_subregions):
-                for j in range(num_subregions):
-                    subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
-                                       (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
-                    if subarea.intersects(feature.geometry):
-                        subregion = ee.Geometry.Rectangle(list(subarea.bounds))
-                        subregions.append(subregion.intersection(shapefile_bbox))
     
-    processedDf1 = df1.empty
+    # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
-        if df.empty:
-            image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-            extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
+        image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        image_names.add(image_name[6:-4])
         
-            # suppress output of downloaded images (image limit = 48 MB)
+        if len(bandnames) < 1024 and feature.Area_km2 < 5:
+            # suppress output of downloaded images (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):
-                geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, region=subregion, crs=mycrs)
-                if len(bandnames1) > 13 and df1.empty:
-                    geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, region=subregion, crs=mycrs)
-            try:
-                df = geotiffToCsv(image_name, bandnames)
-                if os.path.exists(extra_image_name):
-                    df1 = geotiffToCsv(extra_image_name, bandnames1)
-            except:
-                continue
-        df = processGeotiffCsv(df)
+                geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
+        elif not os.path.exists(image_name):
+            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[6:-4], folder="files", crs=mycrs, region=subregion, scale=30)
+    
+    tasks = ee.batch.Task.list()
+    for count in range(len(subregions)):    # read in each downloaded image, process and stack them into a dataframe
+        isOngoing = True
+        filename, image_name = None, None
+        while isOngoing:
+            for task in tasks:
+                if task.status()['description'] in image_names and task.status()['state'] == 'COMPLETED':
+                    filename = task.status()['description']
+                    image_names.remove(filename)
+                    isOngoing = False
+                    break
+                else:
+                    time.sleep(1)
+        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
+        for file in file_list:
+            if file['title'] == filename + ".tif":
+                image_name = "files/" + filename + ".tif"
+                file.GetContentFile(image_name)
+        try:
+            df = geotiffToCsv(image_name, bandnames)
+        except:
+            continue
+        df = processGeotiff(df)
         all_data = pd.concat([all_data, df])
-        # runs if all bands beyond 1024 are already processed
-        if not processedDf1:
-            df1 = processGeotiffCsv(df1)
-            all_data = pd.concat([all_data, df1])
-            processedDf1 = True
-            df1 = pd.DataFrame()
-        if not df1.empty:
-            df1 = processGeotiffCsv(df1)
-            all_data = pd.concat([all_data, df1])
-            df1 = pd.DataFrame()
         df = pd.DataFrame()
     print("\nBand data extraction done!")    
     all_data.head()
@@ -322,8 +315,8 @@ def processMeadow(meadowIdx):
 
 
 # processMeadow(0)   # 4614 (largest), 4569 (smallest) for zone 10
-allIds = list(range(2000, 2500))    # zone10_meadows.index   # [4569, 6, 1, 22, 4234, 4609, 27, 1048, 935, 1233, 1373, 1255, 4614]
+allIdx = list(range(2000, 2500))    # zone10_meadows.index   # [4569, 6, 1, 22, 4234, 4609, 27, 1048, 935, 1233, 1373, 1255, 4614]
 with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
-    parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIds)
+    parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
 
 shapefile = None
