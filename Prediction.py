@@ -212,7 +212,7 @@ def processMeadow(meadowIdx):
         gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
         
-        # align other satellite data with landsat and make resolution uniform (30m)
+        # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
             daymet_swe = daymetv4.resample('bilinear').toFloat()
             flow_30m = flow_band.resample('bilinear').toFloat()
@@ -265,9 +265,10 @@ def processMeadow(meadowIdx):
                             isOngoing = False
                             break
                         elif task.status()['state'] == 'FAILED':
+                            isOngoing = False
                             break
                         else:
-                            time.sleep(1)
+                            time.sleep(0.1)
             file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
             for file in file_list:
                 if file['title'] == filename + ".tif":
@@ -290,19 +291,18 @@ def processMeadow(meadowIdx):
         all_data.reset_index(drop=True, inplace=True)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
         dfSize = all_data.shape[0]
+        if dfSize >= 2e6:
+            print("Daily interpolation of huge meadow ID = {} replaced with multiplication by data periodicity as scale factor!".format(meadowId))
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group, flag=dfSize).reset_index(drop=True)
 
-        # Predict AGB/BGB per pixel using integrals
+        # Predict AGB/BGB per pixel using integrals and set negative values to zero
         uniquePts = all_data.groupby(['X', 'Y'])
         max_Ids = uniquePts.head(1).index
         agb_bgb = pd.DataFrame()
         agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_Ids, agb_col])
         agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_Ids, agb_col])
-        
-        # Turn negative AGB/BGB to zero and interpolate GHG    
         agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
         agb_bgb.loc[agb_bgb['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-        agb_bgb.describe()
         print("Predictions and interpolations done!")
         
         utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values

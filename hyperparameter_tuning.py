@@ -44,4 +44,4 @@ def trainModel(alpha):
     return hypertune
 
 with Parallel(n_jobs=13, prefer="threads") as parallel:
-    parallel(delayed(trainModel)(alpha) for alpha in learning_rate)
+    result = parallel(delayed(trainModel)(alpha) for alpha in learning_rate)
