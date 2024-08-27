@@ -5,18 +5,19 @@ Created on Tue May 21 15:55:04 2024
 @author: jonyegbula
 """
 
-import numpy as np
+import math
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
 from joblib import Parallel, delayed
 
 parameters = {'subsample': [x/100 for x in range(30, 101, 10)], 'n_estimators': [25,50,75,100,125,150,200,250,500,750,1000,2000,2500,5000], 'max_depth': range(3,15)}
-
-hypertune = {'Mean_RMSE': [float('Inf')], 'Test_RMSE': [float('Inf')]}
-count = 0
-
 learning_rate = [0.01,0.02,0.03,0.05,0.07,0.08,0.1,0.13,0.16,0.2,0.25,0.3,0.35]
+
 def trainModel(alpha):
+    os.chdir(mydir)
+    hypertune = {'Mean_RMSE': [float('Inf')], 'Test_RMSE': [float('Inf')]}
+    count = 0
+    
     for sub in parameters['subsample']:
         for n_est in parameters['n_estimators']:
             for depth in parameters['max_depth']:
@@ -27,11 +28,11 @@ def trainModel(alpha):
                 y_train_pred = gbm_model.predict(X_train)
                 y_test_pred = gbm_model.predict(X_test)
                
-                train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+                train_rmse = math.sqrt(mean_squared_error(y_train, y_train_pred))
                 val = (y_train_pred - y_train) / y_train
-                test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+                test_rmse = math.sqrt(mean_squared_error(y_test, y_test_pred))
                 val = (y_test_pred - y_test) / y_test
-                mean_rmse = np.mean(train_rmse, test_rmse)
+                mean_rmse = (train_rmse + test_rmse)/2
                
                 if mean_rmse < hypertune['Mean_RMSE'][0]:
                     hypertune['Mean_RMSE'] = [mean_rmse, alpha, n_est, sub, depth, 0.2]
@@ -45,3 +46,10 @@ def trainModel(alpha):
 
 with Parallel(n_jobs=13, prefer="threads") as parallel:
     result = parallel(delayed(trainModel)(alpha) for alpha in learning_rate)
+
+hypertune = {'Mean_RMSE': [float('Inf')], 'Test_RMSE': [float('Inf')]}
+for x in result:
+    if x['Mean_RMSE'][0] < hypertune['Mean_RMSE'][0]:
+        hypertune['Mean_RMSE'] = x['Mean_RMSE']
+    if x['Test_RMSE'][0] < hypertune['Test_RMSE'][0]:
+        hypertune['Test_RMSE'] = x['Test_RMSE']

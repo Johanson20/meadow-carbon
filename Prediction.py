@@ -10,6 +10,7 @@ import time
 import ee
 import numpy as np
 import pickle
+import warnings
 import pandas as pd
 import geopandas as gpd
 import geemap
@@ -25,6 +26,7 @@ from pydrive.drive import GoogleDrive
 
 mydir = "R:\SCRATCH\jonyegbula\meadow-carbon"
 os.chdir(mydir)
+warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in url
 
 # Authenticate and initialize python access to Google Earth Engine
@@ -46,16 +48,7 @@ gauth.SaveCredentialsFile("mycreds.txt")
 drive = GoogleDrive(gauth)
 
 ncores = multiprocessing.cpu_count()
-year = 2021
-start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
-date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
-landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
-landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
-landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
-
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
@@ -112,9 +105,12 @@ def processGeotiff(df):
     nullIds =  list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
-    
-    # temporary dataframe for each iteration to be appended to the overall dataframe
+    NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
+    df = df[~NA_Ids]
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
     df.columns = cols[:-7]
+    
     df['Date'] = pd.to_timedelta(df['Date'], unit='s') + pd.to_datetime('1970-01-01')
     df['Date'] = pd.to_datetime(df['Date'].dt.strftime('%Y-%m-%d'))
     df['NDVI'] = (df['NIR'] - df['Red'])/(df['NIR'] + df['Red'])
@@ -124,11 +120,8 @@ def processGeotiff(df):
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
     df['NDPI'] = (df['NIR'] - (0.56*df['Red'] + 0.44*df['SWIR_2']))/(df['NIR'] + 0.56*df['Red'] + 0.44*df['SWIR_2'])
     df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
-    df.dropna(inplace=True)
-    df.drop_duplicates(inplace=True)
-    NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
     
-    return df[~NA_Ids]
+    return df
 
 
 def interpolate_group(group, flag):
@@ -158,7 +151,6 @@ ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 ghg_col, agb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_)
 
-landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
@@ -166,6 +158,16 @@ utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs), "EPSG:
 zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
 # utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs), "EPSG:32611"
 # zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection")   # Repeat all for zone 10 (make changes)
+
+year = 2021
+start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
+date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
 
 
 def processMeadow(meadowIdx):
@@ -222,6 +224,7 @@ def processMeadow(meadowIdx):
             bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
             combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
         print(idx, end=' ')
+    print()
         
     if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
@@ -282,7 +285,7 @@ def processMeadow(meadowIdx):
         df = processGeotiff(df)
         all_data = pd.concat([all_data, df])
         df = pd.DataFrame()
-    print("\nBand data extraction done!")    
+    print("Band data extraction done!")    
     all_data.head()
     
     if not all_data.empty:
@@ -320,13 +323,15 @@ def processMeadow(meadowIdx):
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
     else:
-        print('meadowId = {}, at index: {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
+        print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
     print(datetime.now() - start)
+    
+    return meadowIdx
 
 
 # processMeadow(0)   # 4614 (largest), 4569 (smallest) for zone 10
 allIdx = list(range(2000, 2500))    # zone10_meadows.index   # [4569, 6, 1, 22, 4234, 4609, 27, 1048, 935, 1233, 1373, 1255, 4614]
 with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
-    parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
+    result = parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
 
 shapefile = None
