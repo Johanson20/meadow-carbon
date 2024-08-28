@@ -124,13 +124,9 @@ def processGeotiff(df):
     return df
 
 
-def interpolate_group(group, flag):
-    scale = 1
-    if flag < 2e6:     # processes meadows with less than 2 million rows
-        group.drop_duplicates(subset='Date', inplace=True)
-        group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
-    else:   # for huge meadows, don't interpolate daily but multiply by mean landsat periodicity
-        scale = len(date_range)/group.shape[0]
+def interpolate_group(group):
+    group.drop_duplicates(subset='Date', inplace=True)
+    group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
     
     group['Mean_Precipitation'] = group['Mean_Precipitation'].mean()
     integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
@@ -138,18 +134,18 @@ def interpolate_group(group, flag):
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
     for integral in integrals.keys():
-        group['d'+integral] = integrals[integral]*scale
-    group['CO2.umol.m2.s'] *= scale 
+        group['d'+integral] = integrals[integral]
+    group['GHG_sum'] = sum(group['CO2.umol.m2.s']) 
     group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
     
-    return group
+    return group.head(1)
 
 
 #load ML GBM models
 f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
-ghg_col, agb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_)
+ghg_col, biomass_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
@@ -293,33 +289,29 @@ def processMeadow(meadowIdx):
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
-        dfSize = all_data.shape[0]
-        if dfSize >= 2e6:
-            print("Daily interpolation of huge meadow ID = {} replaced with multiplication by data periodicity as scale factor!".format(meadowId))
-        all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group, flag=dfSize).reset_index(drop=True)
+        all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
 
         # Predict AGB/BGB per pixel using integrals and set negative values to zero
-        uniquePts = all_data.groupby(['X', 'Y'])
-        max_Ids = uniquePts.head(1).index
         agb_bgb = pd.DataFrame()
-        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[max_Ids, agb_col])
-        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[max_Ids, agb_col])
+        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, biomass_col])
+        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, biomass_col])
         agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
         agb_bgb.loc[agb_bgb['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
         print("Predictions and interpolations done!")
         
-        utm_lons, utm_lats = uniquePts['X'].first().values, uniquePts['Y'].first().values
+        utm_lons, utm_lats = all_data['X'], all_data['Y']
         res = 30
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
-        out_rasters = {1: ['AGB.tif', 'HerbBio.g.m2'], 2: ['BGB.tif', 'Roots.kg.m2'], 3: ['GHG.tif', 'CO2.umol.m2.s']}
+        out_rasters = {1: ['AGB.tif', 'HerbBio.g.m2'], 2: ['BGB.tif', 'Roots.kg.m2'], 3: ['GHG.tif', 'GHG_sum']}
         for i in range(1,4):
             out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
+            response_col = out_rasters[i][1]
             if i == 3:
-                pixel_values = pd.Series(uniquePts[out_rasters[i][1]].sum().values, name=out_rasters[i][1])
+                pixel_values = all_data['GHG_sum']
             else:
-                pixel_values = agb_bgb[out_rasters[i][1]]
+                pixel_values = agb_bgb[response_col]
             gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
-            gdf.plot(column=out_rasters[i][1], cmap='viridis', legend=True)
+            gdf.plot(column=response_col, cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
     else:

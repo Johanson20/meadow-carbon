@@ -25,7 +25,7 @@ nullIds =  data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)
 data.drop(nullIds, inplace = True)
 data.reset_index(drop=True, inplace=True)
 # adjust datetime format
-data['SampleDate'] = [pd.to_datetime(x).strftime("%Y-%m-%d") if len(x) > 4 else pd.to_datetime(x).strftime("%Y") for x in data['SampleDate']]
+data['SampleDate'] = [pd.to_datetime(x).strftime("%Y-%m-%d") for x in data['SampleDate']]
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -43,6 +43,8 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
+openet = ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0").select('et_ensemble_mad')
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('def')
 
 
 def calculateIndices(image):
@@ -130,7 +132,7 @@ target_date = ''
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 NDVI, NDWI, EVI, SAVI, BSI, NDSI, NDPI = [], [], [], [], [], [], []
 flow, slope, elevation, wet, snowy = [], [], [], [], []
-mean_annual_pr, swe, peak_dates, driver  = [], [], [], []
+mean_annual_pr, swe, et, cdef, peak_dates, driver  = [], [], [], [], [], []
 dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
 dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDSI, dNDPI = [], [], [], [], [], [], []
 
@@ -140,7 +142,7 @@ for idx in range(data.shape[0]):
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
-    year = target_date[:4]
+    year, month, day = target_date.split("-")
     band_values, integrals, snow_days, wet_days = getPeakBandValues(point, year)
     
     if not band_values['Blue']:
@@ -152,21 +154,23 @@ for idx in range(data.shape[0]):
         for band in integrals.index:
             integrals[band] = 0
     
-    # compute mean annual precipitation from gridmet (resolution = 4,638.3m) and SWE from daymetv4 (1km resolution)
+    # compute values from daymetv4 (1km resolution), gridmet and terraclimate (both have resolution of 4,638.3m)
     mycrs = 'EPSG:326' + str(band_values['UTM'])
     gridmet_filtered = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
-    mean_pr = gridmet_filtered.reproject(crs=mycrs, scale=30).reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['pr']
+    climatedef = terraclimate.filterBounds(point).filterDate(year + "-" + month + "-01", year + "-" + str(int(month)+1) + "-01")
     daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
-    daymet_swe = daymetv4.reproject(crs=mycrs, scale=30)
-    swe_value = daymet_swe.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    mean_pr = gridmet_filtered.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['pr']
+    cdef_value = climatedef.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['def']
+    swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); 
-    flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
+    # compute flow accumulation (463.83m resolution); openET (30m resolution) slope and aspect (10.2m resolution); 
     dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    et_mean = openet.filterBounds(point).filterDate(year + "-" + month + "-01", year + "-" + str(int(month)+1) + "-01").first()
+    flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+    et_value = et_mean.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['et_ensemble_mad']
     
     Blue.append(band_values['Blue'])
     Green.append(band_values['Green'])
@@ -203,6 +207,8 @@ for idx in range(data.shape[0]):
     elevation.append(elev)
     slope.append(slope_value)
     swe.append(swe_value)
+    et.append(et_value)
+    cdef.append(cdef_value)
     peak_dates.append(band_values['Date'])
     driver.append(band_values['Driver'])
     
@@ -235,6 +241,8 @@ data['SWE'] = swe
 data['Mean_Precipitation'] = mean_annual_pr
 data['Snow_days'] = snowy
 data['Wet_days'] = wet
+data['Cdef'] = cdef
+data['ET'] = et
 
 data['dBlue'] = dBlue
 data['dGreen'] = dGreen

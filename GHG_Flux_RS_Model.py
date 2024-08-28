@@ -16,8 +16,10 @@ data = pd.read_csv("csv/GHG Flux_RS Model.csv")
 data.head()
 data.drop('Unnamed: 0', axis=1, inplace=True)
 data.drop_duplicates(inplace=True)  # remove duplicate rows
-data.reset_index(drop=True, inplace=True)
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
+nullIds = data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index
+data.drop(nullIds, inplace = True)
+data.reset_index(drop=True, inplace=True)
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
 
 # Authenticate and Initialize the Earth Engine API
@@ -180,7 +182,6 @@ cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
-data['ID'].value_counts()
 
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols[8:] if c not in ['Elevation', 'Driver', 'Days_of_data_acquisition_offset']]
