@@ -24,6 +24,7 @@ def maskClouds(image):
     # mask out cloud based on bits in QA_pixel
     qa = image.select('QA_PIXEL')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
     cloud = qa.bitwiseAnd(1 << 3).eq(0)
     cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
     # update image with combined mask

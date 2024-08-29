@@ -270,6 +270,9 @@ from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
+from sklearn.inspection import PartialDependenceDisplay
+from matplotlib.backends.backend_pdf import PdfPages
+import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -302,6 +305,14 @@ data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
+# make scatter plots of relevant variables from raw dataframe
+with PdfPages('BGB_Scatter_plots.pdf') as pdf:
+    for feature in var_col:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+        pdf.savefig(fig)
+        plt.close(fig)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
 gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
@@ -313,10 +324,18 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=50, subsample=0.6,
+bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=3, n_estimators=100, subsample=0.8,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
+# Make partial dependence plots
+with PdfPages('BGB_partial_dependence_plots.pdf') as pdf:
+    for i in range(len(var_col)):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        PartialDependenceDisplay.from_estimator(bgb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
+        ax.set_title(f'Partial Dependence of {var_col[i]}')
+        pdf.savefig(fig)
+        plt.close(fig)
 len(bgb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
@@ -403,6 +422,14 @@ data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
+# make scatter plots of relevant variables from raw dataframe
+with PdfPages('AGB_Scatter_plots.pdf') as pdf:
+    for feature in var_col:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+        pdf.savefig(fig)
+        plt.close(fig)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
 gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
@@ -414,10 +441,18 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=5, n_estimators=25, subsample=0.8,
+agb_model = GradientBoostingRegressor(learning_rate=0.11, max_depth=6, n_estimators=50, subsample=0.4,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
+# Make partial dependence plots
+with PdfPages('AGB_partial_dependence_plots.pdf') as pdf:
+    for i in range(len(var_col)):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        PartialDependenceDisplay.from_estimator(agb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
+        ax.set_title(f'Partial Dependence of {var_col[i]}')
+        pdf.savefig(fig)
+        plt.close(fig)
 len(agb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
