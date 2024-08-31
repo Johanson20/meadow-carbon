@@ -297,7 +297,7 @@ sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
-nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
+nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
 # drop highest 3 values of y_field (outliers)
 outlierIds = data.sort_values(y_field, ascending=False)[:3].index
@@ -306,7 +306,7 @@ data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
-with PdfPages('BGB_Scatter_plots.pdf') as pdf:
+with PdfPages('files/BGB_Scatter_plots.pdf') as pdf:
     for feature in var_col:
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
@@ -329,7 +329,7 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=3, n_estimato
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 # Make partial dependence plots
-with PdfPages('BGB_partial_dependence_plots.pdf') as pdf:
+with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
     for i in range(len(var_col)):
         fig, ax = plt.subplots(figsize=(8, 6))
         PartialDependenceDisplay.from_estimator(bgb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
@@ -417,13 +417,13 @@ sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
-nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
+nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
-with PdfPages('AGB_Scatter_plots.pdf') as pdf:
+with PdfPages('files/AGB_Scatter_plots.pdf') as pdf:
     for feature in var_col:
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
@@ -446,7 +446,7 @@ agb_model = GradientBoostingRegressor(learning_rate=0.11, max_depth=6, n_estimat
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
 # Make partial dependence plots
-with PdfPages('AGB_partial_dependence_plots.pdf') as pdf:
+with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
     for i in range(len(var_col)):
         fig, ax = plt.subplots(figsize=(8, 6))
         PartialDependenceDisplay.from_estimator(agb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)

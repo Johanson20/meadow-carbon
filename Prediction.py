@@ -172,6 +172,8 @@ def processMeadow(meadowIdx):
     feature = zone10_meadows.loc[meadowIdx, :]
     meadowId = feature.ID
     if feature.geometry.geom_type == 'Polygon':
+        if feature.Area_km2 > 0.1:
+            feature.geometry = feature.geometry.simplify(0.001)
         shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
     elif feature.geometry.geom_type == 'MultiPolygon':
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
@@ -238,6 +240,7 @@ def processMeadow(meadowIdx):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                     subregions.append(subregion.intersection(shapefile_bbox))    
     
+    current_time = 0    # datetime.now().timestamp()*1000 (use this when ready for actual run)
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
@@ -258,7 +261,7 @@ def processMeadow(meadowIdx):
             filename = None
             while isOngoing:
                 for task in tasks:
-                    if task.status()['description'] in image_names:
+                    if task.status()['description'] in image_names and task.status()['creation_timestamp_ms'] > current_time:
                         if task.status()['state'] == 'COMPLETED':
                             filename = task.status()['description']
                             isOngoing = False

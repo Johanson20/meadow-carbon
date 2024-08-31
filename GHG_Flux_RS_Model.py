@@ -202,7 +202,7 @@ data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
-with PdfPages('GHG_Scatter_plots.pdf') as pdf:
+with PdfPages('files/GHG_Scatter_plots.pdf') as pdf:
     for feature in var_col:
         fig, ax = plt.subplots(figsize=(8, 6))
         sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
@@ -240,18 +240,18 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=12, n_estimators=250, subsample=1,
+ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=7, n_estimators=250, subsample=0.9,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
+ghg_model.fit(X_train, y_train)
 # Make partial dependence plots
-with PdfPages('GHG_partial_dependence_plots.pdf') as pdf:
+with PdfPages('files/GHG_partial_dependence_plots.pdf') as pdf:
     for i in range(len(var_col)):
         fig, ax = plt.subplots(figsize=(8, 6))
         PartialDependenceDisplay.from_estimator(ghg_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
         ax.set_title(f'Partial Dependence of {var_col[i]}')
         pdf.savefig(fig)
         plt.close(fig)
-ghg_model.fit(X_train, y_train)
 len(ghg_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
