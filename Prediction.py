@@ -17,7 +17,8 @@ import geemap
 import multiprocessing
 import contextlib
 import rioxarray as xr
-from datetime import datetime, timedelta
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from geocube.api.core import make_geocube
 from joblib import Parallel, delayed
 from shapely.geometry import Polygon
@@ -52,7 +53,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation', 'Date', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation', 'Date', 'Cdef', 'ET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -76,15 +77,15 @@ def geotiffToCsv(input_raster, bandnames):
     df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
     geotiff.close()
     nrows = df.shape[0]
-    
+
     out_csv = pd.DataFrame()
     allBands = set(df.columns)
     nBands = len(bandnames)
     
-    # There are 10 (repeating) landsat, gridmet and constant value bands
-    for col in range(1, 11):
+    # There are 12 repeating bands
+    for col in range(1, 13):
         values = []
-        for band in [col] + list(range(13+col, nBands+1, 10)):
+        for band in [col] + list(range(15+col, nBands+1, 12)):
             if band in allBands:
                 values = values + list(df[band])
             else:
@@ -93,7 +94,7 @@ def geotiffToCsv(input_raster, bandnames):
     
     # repeat the other columns throughout length of dataframe
     n = int(out_csv.shape[0]/nrows)
-    for col in range(11, 14):
+    for col in range(13, 16):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -102,7 +103,7 @@ def geotiffToCsv(input_raster, bandnames):
 
 
 def processGeotiff(df):
-    nullIds =  list(np.where(df['tmmx'].isnull())[0])
+    nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
@@ -130,12 +131,17 @@ def interpolate_group(group):
     
     group['Mean_Precipitation'] = group['Mean_Precipitation'].mean()
     integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
+    # growing season is defined as NDSI <= 0.2; water covered is defined as NDWI > 0.5
     group.loc[group['NDSI'] > 0.2, 'EVI'] = 0
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
-    group['GHG_sum'] = sum(group['CO2.umol.m2.s']) 
+    # actively growing vegetation is when NDVI >= 0.2
+    resp = group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s']
+    resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
+    group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
+    group['GHG'] = sum(group['CO2.umol.m2.s'])
     group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
     
     return group.head(1)
@@ -164,7 +170,8 @@ landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
-
+openet = ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0").filterDate(start_year, end_year.replace("-10-", "-11-")).select('et_ensemble_mad')
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select('def')
 
 def processMeadow(meadowIdx):
     start = datetime.now()
@@ -198,29 +205,33 @@ def processMeadow(meadowIdx):
     df = pd.DataFrame()
     combined_image = None
     image_names = set()
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'b1', 'slope', 'swe']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'Cdef', 'ET', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
     for idx in range(noImages):
         landsat_image = ee.Image(image_list.get(idx)).toFloat()
         # use each date in which landsat image exists to extract bands of gridmet
-        start_date = timedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
+        start_date = relativedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
         date = datetime.strftime(start_date, '%Y-%m-%d')
+        target_month = date[:-2] + "01"
+        next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
         
-        gridmet_filtered = gridmet.filterDate(date, (start_date + timedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
+        gridmet_filtered = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
         gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
+        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).resample('bilinear').toFloat()
+        et_mean = openet.filterDate(target_month, next_month).first().clip(shapefile_bbox).toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
             daymet_swe = daymetv4.resample('bilinear').toFloat()
             flow_30m = flow_band.resample('bilinear').toFloat()
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').toFloat()
-            combined_image = landsat_image.addBands([gridmet_30m, date_band, flow_30m, slope_30m, daymet_swe])
+            combined_image = landsat_image.addBands([gridmet_30m, date_band, climatedef, et_mean, flow_30m, slope_30m, daymet_swe])
         else:
-            bandnames = bandnames.copy() + bandnames[:10]     # 10 total of: landsat, gridmet and constant bands
-            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band])
+            bandnames = bandnames.copy() + bandnames[:12]     # 12 total of recurring bands
+            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band, climatedef, et_mean])
         print(idx, end=' ')
     print()
         
@@ -294,25 +305,25 @@ def processMeadow(meadowIdx):
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
 
-        # Predict AGB/BGB per pixel using integrals and set negative values to zero
-        agb_bgb = pd.DataFrame()
-        agb_bgb['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, biomass_col])
-        agb_bgb['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, biomass_col])
-        agb_bgb.loc[agb_bgb['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
-        agb_bgb.loc[agb_bgb['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+        # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
+        all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, biomass_col])
+        all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, biomass_col])
+        all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+        all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+        Rh = 12.01*60*60*24*all_data['CO2.umol.m2.s']/1e6
+        ANPP = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Precipitation']))*0.368*1e3
+        BNPP = all_data['HerbBio.g.m2']*0.433
+        all_data['NEP'] = ANPP + BNPP - Rh
         print("Predictions and interpolations done!")
         
         utm_lons, utm_lats = all_data['X'], all_data['Y']
         res = 30
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
-        out_rasters = {1: ['AGB.tif', 'HerbBio.g.m2'], 2: ['BGB.tif', 'Roots.kg.m2'], 3: ['GHG.tif', 'GHG_sum']}
-        for i in range(1,4):
+        out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'GHG'], 3: ['NEP.tif', 'NEP']}
+        for i in range(4):
             out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
             response_col = out_rasters[i][1]
-            if i == 3:
-                pixel_values = all_data['GHG_sum']
-            else:
-                pixel_values = agb_bgb[response_col]
+            pixel_values = all_data[response_col]
             gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
             gdf.plot(column=response_col, cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))

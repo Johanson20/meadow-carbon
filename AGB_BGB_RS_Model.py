@@ -441,7 +441,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.11, max_depth=6, n_estimators=50, subsample=0.4,
+agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=50, subsample=0.4,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
