@@ -103,7 +103,7 @@ def geotiffToCsv(input_raster, bandnames):
 
 
 def processGeotiff(df):
-    nullIds = list(np.where(df['tmmx'].isnull())[0])
+    nullIds = list(df.index[np.isinf(df['tmmx'])])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
@@ -130,6 +130,7 @@ def interpolate_group(group):
     group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
     
     group['Mean_Precipitation'] = group['Mean_Precipitation'].mean()
+    group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
     integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
     # growing season is defined as NDSI <= 0.2; water covered is defined as NDWI > 0.5
     group.loc[group['NDSI'] > 0.2, 'EVI'] = 0
@@ -141,7 +142,7 @@ def interpolate_group(group):
     resp = group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s']
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
     group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
-    group['GHG'] = sum(group['CO2.umol.m2.s'])
+    group['Rh'] = sum(group['CO2.umol.m2.s'])*12.01*60*60*24/1e6
     group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
     
     return group.head(1)
@@ -251,7 +252,7 @@ def processMeadow(meadowIdx):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                     subregions.append(subregion.intersection(shapefile_bbox))    
     
-    current_time = 0    # datetime.now().timestamp()*1000 (use this when ready for actual run)
+    current_time = datetime.now().timestamp()*1000
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
@@ -310,16 +311,15 @@ def processMeadow(meadowIdx):
         all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, biomass_col])
         all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
         all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-        Rh = 12.01*60*60*24*all_data['CO2.umol.m2.s']/1e6
-        ANPP = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Precipitation']))*0.368*1e3
-        BNPP = all_data['HerbBio.g.m2']*0.433
-        all_data['NEP'] = ANPP + BNPP - Rh
+        all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
+        all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
+        all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
         print("Predictions and interpolations done!")
         
         utm_lons, utm_lats = all_data['X'], all_data['Y']
         res = 30
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
-        out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'GHG'], 3: ['NEP.tif', 'NEP']}
+        out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'Rh'], 3: ['NEP.tif', 'NEP']}
         for i in range(4):
             out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
             response_col = out_rasters[i][1]
