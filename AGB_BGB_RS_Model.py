@@ -287,7 +287,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  ['Flow', 'Slope'] + list(cols[27:-2]) + ['dNDPI']
+var_col =  ['Flow', 'Slope'] + list(cols[33:-2]) + ['dNDPI']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -299,8 +299,8 @@ sum(subdata[y_field].isnull())
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
-# drop highest 3 values of y_field (outliers)
-outlierIds = data.sort_values(y_field, ascending=False)[:3].index
+# drop values with root biomass greater than 12 (outliers)
+outlierIds = data.sort_values(y_field, ascending=False)[:12].index
 data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
@@ -324,7 +324,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=3, n_estimators=100, subsample=0.8,
+bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=9, n_estimators=50, subsample=0.8,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)

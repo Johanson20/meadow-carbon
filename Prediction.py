@@ -103,7 +103,7 @@ def geotiffToCsv(input_raster, bandnames):
 
 
 def processGeotiff(df):
-    nullIds = list(df.index[np.isinf(df['tmmx'])])
+    nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.reset_index(drop=True, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
@@ -152,11 +152,11 @@ def interpolate_group(group):
 f = open('files/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
-ghg_col, biomass_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_)
+ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-07-10.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-09-06.shp").to_crs(epsg_crs)
 utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs), "EPSG:32610"
 zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
 # utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs), "EPSG:32611"
@@ -307,8 +307,8 @@ def processMeadow(meadowIdx):
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
 
         # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
-        all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, biomass_col])
-        all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, biomass_col])
+        all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
+        all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, bgb_col])
         all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
         all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
         all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
@@ -335,8 +335,8 @@ def processMeadow(meadowIdx):
     return meadowIdx
 
 
-# processMeadow(0)   # 4614 (largest), 4569 (smallest) for zone 10
-allIdx = list(range(2000, 2500))    # zone10_meadows.index   # [4569, 6, 1, 22, 4234, 4609, 27, 1048, 935, 1233, 1373, 1255, 4614]
+# processMeadow(4568)   # 4532 (largest), 4639 (smallest) for zone 10
+allIdx = list(range(2000, 2500))    # zone10_meadows.index
 with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
     result = parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
 
