@@ -37,14 +37,11 @@ ee.Initialize()
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
-
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select('pr')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-openet = ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0").select('et_ensemble_mad')
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('def')
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr'])
 
 
 def calculateIndices(image):
@@ -156,21 +153,20 @@ for idx in range(data.shape[0]):
     
     # compute values from daymetv4 (1km resolution), gridmet and terraclimate (both have resolution of 4,638.3m)
     mycrs = 'EPSG:326' + str(band_values['UTM'])
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
-    climatedef = terraclimate.filterBounds(point).filterDate(year + "-" + month + "-01", year + "-" + str(int(month)+1) + "-01")
+    tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+    tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
-    mean_pr = gridmet_filtered.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['pr']
-    cdef_value = climatedef.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['def']
+    mean_pr = tclimate['pr']
+    cdef_value = tclimate['def']
+    aet = tclimate['aet']
     swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     
-    # compute flow accumulation (463.83m resolution); openET (30m resolution) slope and aspect (10.2m resolution); 
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); 
     dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    et_mean = openet.filterBounds(point).filterDate(year + "-" + month + "-01", year + "-" + str(int(month)+1) + "-01").first()
     flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
     slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
-    et_value = et_mean.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['et_ensemble_mad']
     
     Blue.append(band_values['Blue'])
     Green.append(band_values['Green'])
@@ -207,7 +203,7 @@ for idx in range(data.shape[0]):
     elevation.append(elev)
     slope.append(slope_value)
     swe.append(swe_value)
-    et.append(et_value)
+    et.append(aet)
     cdef.append(cdef_value)
     peak_dates.append(band_values['Date'])
     driver.append(band_values['Driver'])
@@ -223,12 +219,10 @@ data['Red'] = Red
 data['NIR'] = NIR
 data['SWIR_1'] = SWIR_1
 data['SWIR_2'] = SWIR_2
-
-data['Flow'] = flow
-data['Elevation'] = elevation
-data['Slope'] = slope
 data['peak_date'] = peak_dates
 data['Driver'] = driver
+data['Cdef'] = cdef
+data['Elevation'] = elevation
 
 data['NDVI'] = NDVI
 data['NDWI'] = NDWI
@@ -237,12 +231,13 @@ data['SAVI'] = SAVI
 data['BSI'] = BSI
 data['NDSI'] = NDSI
 data['NDPI'] = NDPI
+data['AET'] = et
+data['Flow'] = flow
+data['Slope'] = slope
 data['SWE'] = swe
-data['Mean_Precipitation'] = mean_annual_pr
+data['Annual_Precipitation'] = mean_annual_pr
 data['Snow_days'] = snowy
 data['Wet_days'] = wet
-data['Cdef'] = cdef
-data['ET'] = et
 
 data['dBlue'] = dBlue
 data['dGreen'] = dGreen
@@ -287,7 +282,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  ['Flow', 'Slope'] + list(cols[33:-2]) + ['dNDPI']
+var_col =  list(cols[27:-2]) + ['dNDPI']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -324,7 +319,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=9, n_estimators=50, subsample=0.8,
+bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=10, n_estimators=75, subsample=0.5,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
@@ -407,7 +402,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = ['Flow', 'Slope'] + list(cols[25:-2]) + ['dNDPI']
+var_col = list(cols[25:-2]) + ['dNDPI']
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -441,7 +436,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=50, subsample=0.4,
+agb_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=12, n_estimators=100, subsample=0.3,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)

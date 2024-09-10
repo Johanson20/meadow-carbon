@@ -53,7 +53,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Mean_Precipitation', 'Date', 'Cdef', 'ET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'Date', 'Cdef', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -105,12 +105,13 @@ def geotiffToCsv(input_raster, bandnames):
 def processGeotiff(df):
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
-    df.reset_index(drop=True, inplace=True)
+    df.columns = cols[:-7]
+    df.drop(['Cdef', 'AET'], axis=1, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
     df = df[~NA_Ids]
     df.dropna(inplace=True)
     df.drop_duplicates(inplace=True)
-    df.columns = cols[:-7]
+    df.reset_index(drop=True, inplace=True)
     
     df['Date'] = pd.to_timedelta(df['Date'], unit='s') + pd.to_datetime('1970-01-01')
     df['Date'] = pd.to_datetime(df['Date'].dt.strftime('%Y-%m-%d'))
@@ -129,7 +130,7 @@ def interpolate_group(group):
     group.drop_duplicates(subset='Date', inplace=True)
     group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
     
-    group['Mean_Precipitation'] = group['Mean_Precipitation'].mean()
+    group['Annual_Precipitation'] = group['Annual_Precipitation'].sum()
     group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
     integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
     # growing season is defined as NDSI <= 0.2; water covered is defined as NDWI > 0.5
@@ -171,8 +172,7 @@ landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
-openet = ee.ImageCollection("OpenET/ENSEMBLE/CONUS/GRIDMET/MONTHLY/v2_0").filterDate(start_year, end_year.replace("-10-", "-11-")).select('et_ensemble_mad')
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select('def')
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select(['def', 'aet'])
 
 def processMeadow(meadowIdx):
     start = datetime.now()
@@ -202,11 +202,11 @@ def processMeadow(meadowIdx):
     daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(str(year)+'-04-01', str(year)+'-04-02').first()
     
     # dataframe to store results for each meadow
-    all_data = pd.DataFrame(columns=cols)
+    all_data = pd.DataFrame(columns=cols[:10] + cols[12:])
     df = pd.DataFrame()
     combined_image = None
     image_names = set()
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'Cdef', 'ET', 'b1', 'slope', 'swe']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'Cdef', 'AET', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
@@ -222,17 +222,16 @@ def processMeadow(meadowIdx):
         gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
         climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).resample('bilinear').toFloat()
-        et_mean = openet.filterDate(target_month, next_month).first().clip(shapefile_bbox).toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
             daymet_swe = daymetv4.resample('bilinear').toFloat()
             flow_30m = flow_band.resample('bilinear').toFloat()
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').toFloat()
-            combined_image = landsat_image.addBands([gridmet_30m, date_band, climatedef, et_mean, flow_30m, slope_30m, daymet_swe])
+            combined_image = landsat_image.addBands([gridmet_30m, date_band, climatedef, flow_30m, slope_30m, daymet_swe])
         else:
             bandnames = bandnames.copy() + bandnames[:12]     # 12 total of recurring bands
-            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band, climatedef, et_mean])
+            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band, climatedef])
         print(idx, end=' ')
     print()
         
@@ -250,7 +249,7 @@ def processMeadow(meadowIdx):
                                    (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
                 if subarea.intersects(feature.geometry):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
-                    subregions.append(subregion.intersection(shapefile_bbox))    
+                    subregions.append(subregion.intersection(shapefile_bbox))
     
     current_time = datetime.now().timestamp()*1000
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
@@ -316,9 +315,9 @@ def processMeadow(meadowIdx):
         all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
         print("Predictions and interpolations done!")
         
+        # make geodataframe of predictions and projected coordinates as crs; convert to raster
         utm_lons, utm_lats = all_data['X'], all_data['Y']
         res = 30
-        # make geodataframe of predictions and projected coordinates as crs; convert to raster
         out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'Rh'], 3: ['NEP.tif', 'NEP']}
         for i in range(4):
             out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
