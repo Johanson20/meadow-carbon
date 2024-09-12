@@ -53,7 +53,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'Date', 'Cdef', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'Date', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -82,10 +82,10 @@ def geotiffToCsv(input_raster, bandnames):
     allBands = set(df.columns)
     nBands = len(bandnames)
     
-    # There are 12 repeating bands
-    for col in range(1, 13):
+    # There are 11 repeating bands
+    for col in range(1, 12):
         values = []
-        for band in [col] + list(range(15+col, nBands+1, 12)):
+        for band in [col] + list(range(14+col, nBands+1, 11)):
             if band in allBands:
                 values = values + list(df[band])
             else:
@@ -94,7 +94,7 @@ def geotiffToCsv(input_raster, bandnames):
     
     # repeat the other columns throughout length of dataframe
     n = int(out_csv.shape[0]/nrows)
-    for col in range(13, 16):
+    for col in range(12, 15):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -106,7 +106,7 @@ def processGeotiff(df):
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
-    df.drop(['Cdef', 'AET'], axis=1, inplace=True)
+    # df.drop(['Cdef', 'AET'], axis=1, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
     df = df[~NA_Ids]
     df.dropna(inplace=True)
@@ -132,11 +132,11 @@ def interpolate_group(group):
     
     group['Annual_Precipitation'] = group['Annual_Precipitation'].sum()
     group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
-    integrals = group[group.NDSI <= 0.2][cols[:6] + cols[-7:-1]].sum()
-    # growing season is defined as NDSI <= 0.2; water covered is defined as NDWI > 0.5
-    group.loc[group['NDSI'] > 0.2, 'EVI'] = 0
+    integrals = group[group.NDSI <= 0.2]
+    # snow days is defined as NDSI > 0.2; water covered is defined as NDWI > 0.5
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
+    integrals = integrals[cols[:6] + cols[-7:-1]].sum()
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
     # actively growing vegetation is when NDVI >= 0.2
@@ -172,7 +172,7 @@ landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select(['def', 'aet'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select('aet')
 
 def processMeadow(meadowIdx):
     start = datetime.now()
@@ -180,8 +180,8 @@ def processMeadow(meadowIdx):
     feature = zone10_meadows.loc[meadowIdx, :]
     meadowId = feature.ID
     if feature.geometry.geom_type == 'Polygon':
-        if feature.Area_km2 > 0.1:
-            feature.geometry = feature.geometry.simplify(0.001)
+        if feature.Area_km2 > 0.5:
+            feature.geometry = feature.geometry.simplify(0.0001)
         shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
     elif feature.geometry.geom_type == 'MultiPolygon':
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
@@ -202,11 +202,11 @@ def processMeadow(meadowIdx):
     daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(str(year)+'-04-01', str(year)+'-04-02').first()
     
     # dataframe to store results for each meadow
-    all_data = pd.DataFrame(columns=cols[:10] + cols[12:])
+    all_data = pd.DataFrame(columns=cols)
     df = pd.DataFrame()
     combined_image = None
     image_names = set()
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'Cdef', 'AET', 'b1', 'slope', 'swe']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'AET', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
@@ -218,19 +218,18 @@ def processMeadow(meadowIdx):
         target_month = date[:-2] + "01"
         next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
         
-        gridmet_filtered = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
-        gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
+        gridmet_30m = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
-        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).resample('bilinear').toFloat()
+        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
-            daymet_swe = daymetv4.resample('bilinear').toFloat()
-            flow_30m = flow_band.resample('bilinear').toFloat()
-            slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).resample('bilinear').toFloat()
+            daymet_swe = daymetv4.toFloat()
+            flow_30m = flow_band.toFloat()
+            slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).toFloat()
             combined_image = landsat_image.addBands([gridmet_30m, date_band, climatedef, flow_30m, slope_30m, daymet_swe])
         else:
-            bandnames = bandnames.copy() + bandnames[:12]     # 12 total of recurring bands
+            bandnames = bandnames.copy() + bandnames[:11]     # 11 total of recurring bands
             combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band, climatedef])
         print(idx, end=' ')
     print()
@@ -257,7 +256,7 @@ def processMeadow(meadowIdx):
         image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         image_names.add(image_name[6:-4])
         
-        if len(bandnames) < 1024 and feature.Area_km2 < 5:
+        if len(bandnames) < 1024 and feature.Area_km2 < 10:
             # suppress output of downloaded images (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
@@ -327,6 +326,7 @@ def processMeadow(meadowIdx):
             gdf.plot(column=response_col, cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
+        all_data.to_csv(f'files/data_{year}_{meadowId}_{meadowIdx}.csv', index=False)
     else:
         print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
     print(datetime.now() - start)

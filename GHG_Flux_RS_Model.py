@@ -31,6 +31,7 @@ landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
@@ -81,7 +82,7 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 # define arrays to store band values and landsat information
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation, driver, time_diff = [], [], [], [], []
-min_temp, max_temp = [], []
+min_temp, max_temp, et = [], [], []
 
 # populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
@@ -89,6 +90,9 @@ for idx in range(data.shape[0]):
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
+    start_month, end_month = target_date[:-2] + "01", target_date[:5] + str(int(target_date[5:7])+1) + "-01"
+    if int(end_month[5:-3]) > 12:
+        end_month = str(int(end_month[:4]) + 1) + "-01-" + end_month[-2:]
     
     # extract Landsat band values
     band_values, t_diff, vxn, mycrs = getBandValues(landsat_collection, point, target_date)
@@ -97,12 +101,14 @@ for idx in range(data.shape[0]):
         print("Row", idx, "dropped!")
         continue
     
-    # compute min and max temperature from gridmet (resolution = 4,638.3m)
+    # compute temperature and AET from gridmet and terraclimate respectively (both have resolution of 4,638.3m)
     gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
     gridmet_30m = gridmet_filtered.first().reproject(crs=mycrs, scale=30)
+    tclimate = terraclimate.filterBounds(point).filterDate(start_month, end_month)
     temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
+    aet = tclimate.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['aet']
     
     # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
     flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
@@ -127,6 +133,7 @@ for idx in range(data.shape[0]):
     time_diff.append(t_diff)
     min_temp.append(tmin)
     max_temp.append(tmax)
+    et.append(aet)
 
     if idx%100 == 0: print(idx, end=' ')
 
@@ -141,6 +148,7 @@ data['SWIR_2'] = SWIR_2
 data['Flow'] = flow
 data['Elevation'] = elevation
 data['Slope'] = slope
+data['AET'] = et
 data['Driver'] = driver
 data['Days_of_data_acquisition_offset'] = time_diff
 data['Minimum_temperature'] = min_temp
@@ -240,7 +248,7 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=7, n_estimators=250, subsample=0.9,
+ghg_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=7, n_estimators=200, subsample=0.8,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 ghg_model.fit(X_train, y_train)
