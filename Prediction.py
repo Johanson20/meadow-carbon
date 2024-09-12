@@ -28,7 +28,7 @@ from pydrive.drive import GoogleDrive
 mydir = "R:\SCRATCH\jonyegbula\meadow-carbon"
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
-folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in url
+folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
@@ -133,9 +133,9 @@ def interpolate_group(group):
     group['Annual_Precipitation'] = group['Annual_Precipitation'].sum()
     group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
     integrals = group[group.NDSI <= 0.2]
-    # snow days is defined as NDSI > 0.2; water covered is defined as NDWI > 0.5
+    # snow days is defined as NDSI > 0.2; water covered is defined as non-snow days with NDWI > 0.5
     group['Snow_days'] = len(date_range) - integrals.shape[0]
-    group['Wet_days'] = group[group.NDWI > 0.5].shape[0]
+    group['Wet_days'] = integrals[integrals.NDWI > 0.5].shape[0]
     integrals = integrals[cols[:6] + cols[-7:-1]].sum()
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
@@ -144,7 +144,8 @@ def interpolate_group(group):
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
     group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
     group['Rh'] = sum(group['CO2.umol.m2.s'])*12.01*60*60*24/1e6
-    group.drop((cols[:6] + cols[-7:]), axis=1, inplace=True)
+    group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
+    group.drop((cols[:8] + cols[-7:]), axis=1, inplace=True)
     
     return group.head(1)
 
@@ -158,10 +159,10 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-09-06.shp").to_crs(epsg_crs)
-utm_zone10, mycrs = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs), "EPSG:32610"
-zone10_meadows = gpd.overlay(shapefile, utm_zone10, how="intersection")
-# utm_zone11, mycrs = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs), "EPSG:32611"
-# zone11_meadows = gpd.overlay(shapefile, utm_zone11, how="intersection")   # Repeat all for zone 10 (make changes)
+shapefile['crs'] = "EPSG:32611"
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
+shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
 
 year = 2021
 start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
@@ -177,11 +178,11 @@ terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_
 def processMeadow(meadowIdx):
     start = datetime.now()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
-    feature = zone10_meadows.loc[meadowIdx, :]
-    meadowId = feature.ID
+    feature = shapefile.loc[meadowIdx, :]
+    meadowId, mycrs = feature.ID, feature.crs
     if feature.geometry.geom_type == 'Polygon':
         if feature.Area_km2 > 0.5:
-            feature.geometry = feature.geometry.simplify(0.0001)
+            feature.geometry = feature.geometry.simplify(0.00001)
         shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
     elif feature.geometry.geom_type == 'MultiPolygon':
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
@@ -326,7 +327,7 @@ def processMeadow(meadowIdx):
             gdf.plot(column=response_col, cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
-        all_data.to_csv(f'files/data_{year}_{meadowId}_{meadowIdx}.csv', index=False)
+        all_data.to_csv(f'files/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
     else:
         print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
     print(datetime.now() - start)
@@ -334,8 +335,8 @@ def processMeadow(meadowIdx):
     return meadowIdx
 
 
-# processMeadow(4568)   # 4532 (largest), 4639 (smallest) for zone 10
-allIdx = list(range(2000, 2500))    # zone10_meadows.index
+# processMeadow(16489)   # 4532 (16450), 16538 (smallest)
+allIdx = shapefile.index
 with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
     result = parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
 
