@@ -25,7 +25,7 @@ from shapely.geometry import Polygon
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
-mydir = "R:\SCRATCH\jonyegbula\meadow-carbon"
+mydir = "R:/SCRATCH/jonyegbula/meadow-carbon"
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
@@ -159,6 +159,9 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-09-06.shp").to_crs(epsg_crs)
+allIdx = shapefile.copy()
+shapefile = None
+shapefile = allIdx.copy()
 shapefile['crs'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
@@ -177,6 +180,8 @@ terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_
 
 def processMeadow(meadowIdx):
     start = datetime.now()
+    os.chdir(mydir)
+    ee.Initialize()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
@@ -337,7 +342,5 @@ def processMeadow(meadowIdx):
 
 # processMeadow(16489)   # 4532 (16450), 16538 (smallest)
 allIdx = shapefile.index
-with Parallel(n_jobs=ncores-12, prefer="threads") as parallel:
+with Parallel(n_jobs=ncores-12, prefer="processes") as parallel:
     result = parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
-
-shapefile = None
