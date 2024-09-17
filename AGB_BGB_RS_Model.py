@@ -295,8 +295,8 @@ sum(subdata[y_field].isnull())
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)
 # drop values with root biomass greater than 12 (outliers)
-outlierIds = data.sort_values(y_field, ascending=False)[:12].index
-data.drop(outlierIds, inplace = True)
+# outlierIds = data[data[y_field] > 12].index
+# data.drop(outlierIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
@@ -319,7 +319,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=10, n_estimators=75, subsample=0.5,
+bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=100, subsample=0.7,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)

@@ -106,7 +106,6 @@ def processGeotiff(df):
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
-    # df.drop(['Cdef', 'AET'], axis=1, inplace=True)
     NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
     df = df[~NA_Ids]
     df.dropna(inplace=True)
@@ -159,6 +158,7 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2024-09-06.shp").to_crs(epsg_crs)
+# file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
@@ -200,7 +200,7 @@ def processMeadow(meadowIdx):
     noImages = len(dates)
     if not noImages:
         print('meadowId = {}, at index: {} is too small for data extraction'.format(meadowId, meadowIdx))
-        return
+        return -1
     
     # clip flow and slope to meadow's bounds
     flow_band = flow_acc.clip(shapefile_bbox)
@@ -308,6 +308,7 @@ def processMeadow(meadowIdx):
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
+        all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
         all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
 
         # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
@@ -335,6 +336,7 @@ def processMeadow(meadowIdx):
         all_data.to_csv(f'files/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
     else:
         print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
+        meadowIdx = -2
     print(datetime.now() - start)
     
     return meadowIdx
