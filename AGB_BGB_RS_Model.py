@@ -161,7 +161,7 @@ for idx in range(data.shape[0]):
     aet = tclimate['aet']
     swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution); 
+    # compute flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
     dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
     flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -494,7 +494,7 @@ plotFeatureImportance()
 plotY()
 
 
-f = open('files/models.pckl', 'wb')
+f = open('csv/models.pckl', 'wb')
 pickle.dump([ghg_model, agb_model, bgb_model], f)
 f.close()
 

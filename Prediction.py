@@ -53,7 +53,7 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slope = ee.Terrain.slope(dem)
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'Date', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 
 def maskAndRename(image):
@@ -126,10 +126,14 @@ def processGeotiff(df):
 
 
 def interpolate_group(group):
-    group.drop_duplicates(subset='Date', inplace=True)
-    group = group.set_index('Date').reindex(date_range).interpolate(method='time').ffill().bfill()
+    group = group.drop_duplicates(subset='Date').set_index('Date').reindex(date_range)
+    group['Month'] = group.index.month
+    interp_cols = [col for col in group.columns if col not in ['AET', 'Annual_Precipitation', 'Month']]
+    # interpolate daily values for all bands except AET (which is monthly values only)
+    group.loc[:, interp_cols] = group.loc[:, interp_cols].interpolate(method='time').ffill().bfill()
+    group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
+    group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
     
-    group['Annual_Precipitation'] = group['Annual_Precipitation'].sum()
     group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
     integrals = group[group.NDSI <= 0.2]
     # snow days is defined as NDSI > 0.2; water covered is defined as non-snow days with NDWI > 0.5
@@ -144,13 +148,13 @@ def interpolate_group(group):
     group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
     group['Rh'] = sum(group['CO2.umol.m2.s'])*12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
-    group.drop((cols[:8] + cols[-7:]), axis=1, inplace=True)
+    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month']), axis=1, inplace=True)
     
     return group.head(1)
 
 
 #load ML GBM models
-f = open('files/models.pckl', 'rb')
+f = open('csv/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
 f.close()
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
@@ -175,8 +179,8 @@ landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B
 landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx', 'pr'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select('aet')
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select(['pr', 'aet'])
 
 def processMeadow(meadowIdx):
     start = datetime.now()
@@ -212,7 +216,7 @@ def processMeadow(meadowIdx):
     df = pd.DataFrame()
     combined_image = None
     image_names = set()
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'tmmn', 'tmmx', 'pr', 'Date', 'AET', 'b1', 'slope', 'swe']
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image
@@ -224,19 +228,20 @@ def processMeadow(meadowIdx):
         target_month = date[:-2] + "01"
         next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
         
-        gridmet_30m = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
+        gridmet_filtered = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
+        gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
-        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).toFloat()
+        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).resample('bilinear').toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
-            daymet_swe = daymetv4.toFloat()
-            flow_30m = flow_band.toFloat()
+            daymet_swe = daymetv4.resample('bilinear').toFloat()
+            flow_30m = flow_band.resample('bilinear').toFloat()
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).toFloat()
-            combined_image = landsat_image.addBands([gridmet_30m, date_band, climatedef, flow_30m, slope_30m, daymet_swe])
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, climatedef, flow_30m, slope_30m, daymet_swe])
         else:
             bandnames = bandnames.copy() + bandnames[:11]     # 11 total of recurring bands
-            combined_image = combined_image.addBands([landsat_image, gridmet_30m, date_band, climatedef])
+            combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, climatedef])
         print(idx, end=' ')
     print()
         
@@ -259,8 +264,8 @@ def processMeadow(meadowIdx):
     current_time = datetime.now().timestamp()*1000
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
-        image_name = f'files/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-        image_names.add(image_name[6:-4])
+        image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        image_names.add(image_name[12:-4])
         
         if len(bandnames) < 1024 and feature.Area_km2 < 10:
             # suppress output of downloaded images (image limit = 48 MB and downloads at most 1024 bands)
@@ -271,7 +276,7 @@ def processMeadow(meadowIdx):
     
     tasks = ee.batch.Task.list()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
-        image_name = ["files/" + imagename + ".tif" for imagename in image_names][0]
+        image_name = ["files/bands/" + imagename + ".tif" for imagename in image_names][0]
         if not os.path.exists(image_name):
             isOngoing = True
             filename = None
@@ -290,10 +295,10 @@ def processMeadow(meadowIdx):
             file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
             for file in file_list:
                 if file['title'] == filename + ".tif":
-                    image_name = "files/" + filename + ".tif"
+                    image_name = "files/bands/" + filename + ".tif"
                     file.GetContentFile(image_name)
         try:
-            image_names.remove(image_name[6:-4])
+            image_names.remove(image_name[12:-4])
             df = geotiffToCsv(image_name, bandnames)
         except:
             continue
