@@ -225,23 +225,25 @@ def processMeadow(meadowIdx):
         # use each date in which landsat image exists to extract bands of gridmet
         start_date = relativedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
         date = datetime.strftime(start_date, '%Y-%m-%d')
+        next_day = (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')
         target_month = date[:-2] + "01"
         next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
         
-        gridmet_filtered = gridmet.filterDate(date, (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')).first().clip(shapefile_bbox)
-        gridmet_30m = gridmet_filtered.resample('bilinear').toFloat()
+        gridmet_filtered = gridmet.filterBounds(shapefile_bbox).filterDate(date, next_day).first()
+        gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
-        climatedef = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox).resample('bilinear').toFloat()
+        tclimate = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox)
+        tclimate_30m = tclimate.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
-            daymet_swe = daymetv4.resample('bilinear').toFloat()
-            flow_30m = flow_band.resample('bilinear').toFloat()
+            swe_30m = daymetv4.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
+            flow_30m = flow_band.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
             slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).toFloat()
-            combined_image = landsat_image.addBands([date_band, gridmet_30m, climatedef, flow_30m, slope_30m, daymet_swe])
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
         else:
             bandnames = bandnames.copy() + bandnames[:11]     # 11 total of recurring bands
-            combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, climatedef])
+            combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
         print(idx, end=' ')
     print()
         
@@ -267,12 +269,12 @@ def processMeadow(meadowIdx):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         image_names.add(image_name[12:-4])
         
-        if len(bandnames) < 1024 and feature.Area_km2 < 10:
+        if len(bandnames) < 1024 and feature.Area_km2 < 5:
             # suppress output of downloaded images (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):
-            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[6:-4], folder="files", crs=mycrs, region=subregion, scale=30)
+            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30)
     
     tasks = ee.batch.Task.list()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
@@ -347,7 +349,7 @@ def processMeadow(meadowIdx):
     return meadowIdx
 
 
-# processMeadow(16489)   # 4532 (16450), 16538 (smallest)
+# processMeadow(16489)   # (16450), 16538 (smallest)
 allIdx = shapefile.index
 with Parallel(n_jobs=ncores-12, prefer="processes") as parallel:
     result = parallel(delayed(processMeadow)(meadowIdx) for meadowIdx in allIdx)
