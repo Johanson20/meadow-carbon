@@ -48,27 +48,6 @@ else:   # Load the existing credentials
 gauth.SaveCredentialsFile("mycreds.txt")
 drive = GoogleDrive(gauth)
 
-ncores = multiprocessing.cpu_count()
-flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-dem = ee.Image('USGS/3DEP/10m').select('elevation')
-slope = ee.Terrain.slope(dem)
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
-
-
-def maskAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
-    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
-    qa = image.select('QA')
-    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
-    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
-    cloud = qa.bitwiseAnd(1 << 3).eq(0)
-    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
-    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
-    image = image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
-    scaled_bands = image.multiply(2.75e-05).add(-0.2)
-    return image.addBands(scaled_bands, overwrite=True)
-
 
 def geotiffToCsv(input_raster, bandnames):
     # creates a dataframe of unique columns (hence combines repeating band names)
@@ -153,6 +132,26 @@ def interpolate_group(group):
     return group.head(1)
 
 
+def maskAndRename(image):
+    # rename bands and mask out cloud based on bits in QA_pixel
+    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    qa = image.select('QA')
+    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
+    cloud = qa.bitwiseAnd(1 << 3).eq(0)
+    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
+    image = image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
+    scaled_bands = image.multiply(2.75e-05).add(-0.2)
+    return image.addBands(scaled_bands, overwrite=True)
+
+def reproject10(image):
+    return image.reproject(crs="EPSG:32610", scale=30)
+
+def reproject11(image):
+    return image.reproject(crs="EPSG:32611", scale=30)
+
+
 #load ML GBM models
 f = open('csv/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
@@ -168,8 +167,22 @@ shapefile = None
 shapefile = allIdx.copy()
 shapefile['crs'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+utm_zone11 = gpd.read_file("files/CA_UTM11.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
+# combine both zones and add a buffer of ~1.11km
+merged_zones = gpd.GeoDataFrame(pd.concat([utm_zone10, utm_zone11], ignore_index=True))
+merged_zones['geometry'] = merged_zones.geometry.buffer(0.001)
+sierra_zone = ee.Geometry.MultiPolygon([list(x.exterior.coords) for x in merged_zones.geometry])
+
+ncores = multiprocessing.cpu_count()
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).reproject(crs="EPSG:32610", scale=30).select('b1')
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).reproject(crs="EPSG:32611", scale=30).select('b1')
+dem = ee.Image('USGS/3DEP/10m').select('elevation')
+slope = ee.Terrain.slope(dem).clip(sierra_zone).reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+slope_11 = ee.Terrain.slope(dem).clip(sierra_zone).reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+
 
 year = 2021
 start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
@@ -178,9 +191,14 @@ landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat5_collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterDate(start_year, end_year)
-landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).map(maskAndRename)
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterDate(start_year, end_year).select(['tmmn', 'tmmx'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_year, end_year.replace("-10-", "-11-")).select(['pr', 'aet'])
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).merge(landsat5_collection).filterBounds(sierra_zone).map(maskAndRename)
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).filterDate(start_year, end_year).map(reproject10).select(['tmmn', 'tmmx'])
+gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).filterDate(start_year, end_year).map(reproject11).select(['tmmn', 'tmmx'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).filterDate(start_year, end_year.replace("-10-", "-11-")).map(reproject10).select(['pr', 'aet'])
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).filterDate(start_year, end_year.replace("-10-", "-11-")).map(reproject11).select(['pr', 'aet'])
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterDate(str(year)+'-04-01', str(year)+'-04-02').first().reproject(crs="EPSG:32610", scale=30).select('swe')
+daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterDate(str(year)+'-04-01', str(year)+'-04-02').first().reproject(crs="EPSG:32611", scale=30).select('swe')
+
 
 def processMeadow(meadowIdx):
     start = datetime.now()
@@ -192,9 +210,10 @@ def processMeadow(meadowIdx):
     if feature.geometry.geom_type == 'Polygon':
         if feature.Area_km2 > 0.5:
             feature.geometry = feature.geometry.simplify(0.00001)
-        shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
+        shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords))
     elif feature.geometry.geom_type == 'MultiPolygon':
-        shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
+        shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms))
+    shapefile_bbox = shapefile_bbox.transform(mycrs, 1e-3).buffer(-30).transform(epsg_crs, 1e-3)
     
     # convert landsat image collection over each meadow to list for iteration
     landsat_images = landsat_collection.filterBounds(shapefile_bbox)
@@ -207,10 +226,15 @@ def processMeadow(meadowIdx):
         return -1
     
     # clip flow and slope to meadow's bounds
-    flow_band = flow_acc.clip(shapefile_bbox)
-    slopeDem = slope.clip(shapefile_bbox)
-    daymetv4 = daymet.filterBounds(shapefile_bbox).filterDate(str(year)+'-04-01', str(year)+'-04-02').first()
-    
+    if mycrs == "EPSG:32611":
+        flow_30m = flow_acc_11.clip(shapefile_bbox).toFloat()
+        slope_30m = slope_11.clip(shapefile_bbox).toFloat()
+        swe_30m = daymet_11.clip(shapefile_bbox).toFloat()
+    else:
+        flow_30m = flow_acc.clip(shapefile_bbox).toFloat()
+        slope_30m = slope.clip(shapefile_bbox).toFloat()
+        swe_30m = daymet.clip(shapefile_bbox).toFloat()
+        
     # dataframe to store results for each meadow
     all_data = pd.DataFrame(columns=cols)
     df = pd.DataFrame()
@@ -228,18 +252,16 @@ def processMeadow(meadowIdx):
         next_day = (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')
         target_month = date[:-2] + "01"
         next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
-        
-        gridmet_filtered = gridmet.filterBounds(shapefile_bbox).filterDate(date, next_day).first()
-        gridmet_30m = gridmet_filtered.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
+        if mycrs == "EPSG:32611":
+            gridmet_30m = gridmet.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
+            tclimate_30m = terraclimate.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
+        else:
+            gridmet_30m = gridmet_11.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
+            tclimate_30m = terraclimate_11.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
         date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
-        tclimate = terraclimate.filterDate(target_month, next_month).first().clip(shapefile_bbox)
-        tclimate_30m = tclimate.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
         
         # align other satellite data with landsat and make resolution (30m) and data types (float32) uniform
         if idx == 0:     # extract constant values once for the same meadow
-            swe_30m = daymetv4.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
-            flow_30m = flow_band.resample('bilinear').reproject(crs=mycrs, scale=30).toFloat()
-            slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).toFloat()
             combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
         else:
             bandnames = bandnames.copy() + bandnames[:11]     # 11 total of recurring bands
@@ -262,9 +284,9 @@ def processMeadow(meadowIdx):
                 if subarea.intersects(feature.geometry):
                     subregion = ee.Geometry.Rectangle(list(subarea.bounds))
                     subregions.append(subregion.intersection(shapefile_bbox))
-    
-    current_time = datetime.now().timestamp()*1000
+
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
+    current_time = datetime.now().timestamp()*1000
     for i, subregion in enumerate(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         image_names.add(image_name[12:-4])
@@ -274,7 +296,7 @@ def processMeadow(meadowIdx):
             with contextlib.redirect_stdout(None):
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):
-            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30)
+            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
     
     tasks = ee.batch.Task.list()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
