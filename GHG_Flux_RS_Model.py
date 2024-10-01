@@ -26,16 +26,6 @@ data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.st
 #ee.Authenticate()
 ee.Initialize()
 
-# reads Landsat data, flow accumulation, gridmet temperature and DEM data (for slope and elevation)
-landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
-landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet')
-flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-dem = ee.Image('USGS/3DEP/10m').select('elevation')
-slopeDem = ee.Terrain.slope(dem)
-
 
 def maskAndRename(image):
     # rename bands and mask out cloud based on bits in QA_pixel
@@ -78,6 +68,29 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
     return [band_values, value['time_difference'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
 
+def resample10(image):
+    return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
+
+def resample11(image):
+    return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
+
+# reads Landsat data, flow accumulation, gridmet temperature, terraclimate and DEM data (for slope and elevation)
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
+# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
+dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+slopeDem = ee.Terrain.slope(dem)
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample10)
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet').map(resample10)
+
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
+dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+slopeDem_11 = ee.Terrain.slope(dem_11)
+gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet').map(resample11)
+
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskAndRename)
 # define arrays to store band values and landsat information
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
@@ -102,21 +115,27 @@ for idx in range(data.shape[0]):
         continue
     
     # compute temperature and AET from gridmet and terraclimate respectively (both have resolution of 4,638.3m)
-    gridmet_filtered = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day'))
-    gridmet_30m = gridmet_filtered.first().reproject(crs=mycrs, scale=30)
-    tclimate = terraclimate.filterBounds(point).filterDate(start_month, end_month)
+    if mycrs == "EPSG:32611":
+        tclimate = terraclimate_11.filterBounds(point).filterDate(start_month, end_month)
+        gridmet_30m = gridmet_11.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
+    else:
+        tclimate = terraclimate.filterBounds(point).filterDate(start_month, end_month)
+        gridmet_30m = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
+    
+    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
+    if mycrs == "EPSG:32611":
+        elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    else:
+        elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slope.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    
     temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
     aet = tclimate.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['aet']
-    
-    # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
-    flow_30m = flow_acc.reproject(crs=mycrs, scale=30)
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    flow_value = flow_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     # append vaues to different lists
     Blue.append(band_values['Blue']*2.75e-05 - 0.2)

@@ -33,17 +33,6 @@ data.head()
 ee.Initialize()
 
 
-# reads Landsat data, flow accumulation, daymet, gridmet temperature and DEM data (for slope and elevation)
-landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
-landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
-flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
-dem = ee.Image('USGS/3DEP/10m').select('elevation')
-slopeDem = ee.Terrain.slope(dem)
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe')
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr'])
-
-
 def calculateIndices(image):
     # rename bands and  normalize raw reflectance values
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
@@ -118,6 +107,30 @@ def getPeakBandValues(point, year, sortAscending=False):
     return [band_values, integrals, no_snow_days, no_wet_days]
 
 
+def resample10(image):
+    return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
+
+def resample11(image):
+    return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
+
+
+# reads Landsat data, flow accumulation, daymet, terraclimate and DEM data (for slope and elevation)
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
+# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
+dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+slopeDem = ee.Terrain.slope(dem)
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample10)
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample10)
+
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
+dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+slopeDem_11 = ee.Terrain.slope(dem_11)
+daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample11)
+
 # merge landsat, then extract unique years and create a dictionary of landsat data for each year
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(calculateIndices)
 years = set([x[:4] for x in data['SampleDate']])
@@ -151,22 +164,28 @@ for idx in range(data.shape[0]):
         for band in integrals.index:
             integrals[band] = 0
     
-    # compute values from daymetv4 (1km resolution), gridmet and terraclimate (both have resolution of 4,638.3m)
+    # compute values from daymetv4 (1km resolution) and terraclimate (resolution of 4,638.3m just like gridmet)
     mycrs = 'EPSG:326' + str(band_values['UTM'])
-    tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+    if mycrs == "EPSG:32611":
+        tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        daymetv4 = daymet_11.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+    else:
+        tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+    
+    swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    if mycrs == "EPSG:32611":
+        elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    else:
+        elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slope.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
     mean_pr = tclimate['pr']
     cdef_value = tclimate['def']
     aet = tclimate['aet']
-    swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
-    
-    # compute flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
-    dem_30m = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    slope_30m = slopeDem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs=mycrs, scale=30)
-    flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    elev = dem_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-    slope_value = slope_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
     
     Blue.append(band_values['Blue'])
     Green.append(band_values['Green'])

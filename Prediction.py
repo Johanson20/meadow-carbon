@@ -144,11 +144,16 @@ def maskAndRename(image):
     scaled_bands = image.multiply(2.75e-05).add(-0.2)
     return image.addBands(scaled_bands, overwrite=True)
 
+
+def landsat7SlcMask(image):
+    slc = image.focalMean(1, 'square', 'pixels', 8)
+    return slc.blend(image)
+
 def resample10(image):
-    return image.reproject(crs="EPSG:32610", scale=30)
+    return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
 def resample11(image):
-    return image.reproject(crs="EPSG:32611", scale=30)
+    return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
 #load ML GBM models
@@ -173,29 +178,35 @@ minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy).buffer(1)], crs=epsg_crs)
 sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords))
 
-ncores = multiprocessing.cpu_count()
-flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
+flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
-dem = ee.Image('USGS/3DEP/10m').select('elevation')
-slope = ee.Terrain.slope(dem).clip(sierra_zone).reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
-slope_11 = ee.Terrain.slope(dem).clip(sierra_zone).reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
-landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterBounds(sierra_zone)
-landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL']).filterBounds(sierra_zone)
-landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterBounds(sierra_zone)
-landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).filterBounds(sierra_zone)
+dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536)
+slope_10 = ee.Terrain.slope(dem).clip(sierra_zone).reproject(crs="EPSG:32610", scale=30)
+slope_11 = ee.Terrain.slope(dem).clip(sierra_zone).reproject(crs="EPSG:32611", scale=30)
+
+landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).map(landsat7SlcMask)
+landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
+landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
+
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
+ncores = multiprocessing.cpu_count()
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 
 # re-run this part for each unique year
 year = 2021
 start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
 date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
-landsat_collection = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).map(maskAndRename).filterDate(start_year, end_year)
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).filterDate(start_year, end_year).map(resample10).select(['tmmn', 'tmmx'])
-gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).filterDate(start_year, end_year).map(resample11).select(['tmmn', 'tmmx'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample10).select(['pr', 'aet'])
-terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11).select(['pr', 'aet'])
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).filterDate(str(year)+'-04-01', str(year)+'-04-02').first().reproject(crs="EPSG:32610", scale=30).select('swe')
-daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).filterDate(str(year)+'-04-01', str(year)+'-04-02').first().reproject(crs="EPSG:32611", scale=30).select('swe')
+landsat_collection = landsat.filterDate(start_year, end_year)
+gridmet_10 = gridmet.filterDate(start_year, end_year).map(resample10)
+gridmet_11 = gridmet.filterDate(start_year, end_year).map(resample11)
+terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample10)
+terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
+daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
+daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
 
 
 def processMeadow(meadowIdx):
@@ -206,10 +217,9 @@ def processMeadow(meadowIdx):
     if feature.geometry.geom_type == 'Polygon':
         if feature.Area_km2 > 0.5:
             feature.geometry = feature.geometry.simplify(0.00001)
-        shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords))
+        shapefile_bbox = ee.Geometry.Polygon(list(feature.geometry.exterior.coords)).buffer(-30)
     elif feature.geometry.geom_type == 'MultiPolygon':
-        shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms))
-    shapefile_bbox = shapefile_bbox.transform(mycrs, 1e-3).buffer(-30).transform(epsg_crs, 1e-3)
+        shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms)).buffer(-30)
     
     # convert landsat image collection over each meadow to list for iteration
     landsat_images = landsat_collection.filterBounds(shapefile_bbox)
@@ -227,9 +237,9 @@ def processMeadow(meadowIdx):
         slope_30m = slope_11.clip(shapefile_bbox).toFloat()
         swe_30m = daymet_11.clip(shapefile_bbox).toFloat()
     else:
-        flow_30m = flow_acc.clip(shapefile_bbox).toFloat()
-        slope_30m = slope.clip(shapefile_bbox).toFloat()
-        swe_30m = daymet.clip(shapefile_bbox).toFloat()
+        flow_30m = flow_acc_10.clip(shapefile_bbox).toFloat()
+        slope_30m = slope_10.clip(shapefile_bbox).toFloat()
+        swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
         
     # dataframe to store results for each meadow
     all_data = pd.DataFrame(columns=cols)
@@ -249,8 +259,8 @@ def processMeadow(meadowIdx):
         target_month = date[:-2] + "01"
         next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
         if mycrs == "EPSG:32611":
-            gridmet_30m = gridmet.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
-            tclimate_30m = terraclimate.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
+            gridmet_30m = gridmet_10.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
+            tclimate_30m = terraclimate_10.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
         else:
             gridmet_30m = gridmet_11.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
             tclimate_30m = terraclimate_11.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
