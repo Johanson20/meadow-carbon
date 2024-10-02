@@ -121,7 +121,7 @@ for idx in range(data.shape[0]):
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(start_month, end_month)
         gridmet_30m = gridmet.filterBounds(point).filterDate(ee.Date(target_date).advance(-1, 'day'), ee.Date(target_date).advance(1, 'day')).first()
-    
+    aet = tclimate.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['aet']
     # compute flow accumulation (463.83m resolution); slope and aspect (10.2m resolution)
     if mycrs == "EPSG:32611":
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
@@ -129,13 +129,12 @@ for idx in range(data.shape[0]):
         flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-        slope_value = slope.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     
     temperature_values = gridmet_30m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
-    aet = tclimate.first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['aet']
     
     # append vaues to different lists
     Blue.append(band_values['Blue']*2.75e-05 - 0.2)
@@ -185,8 +184,7 @@ data.head()
 
 # checks how many pixels are cloud free (non-null value);
 # all bands would be simultaneously cloud-free or not
-ids = [x for x in Blue if x]
-len(ids)
+len([x for x in Blue if x])
 
 # write updated dataframe to new csv file
 data.to_csv('csv/GHG_Flux_RS_Model_Data.csv', index=False)

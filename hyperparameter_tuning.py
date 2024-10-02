@@ -48,9 +48,10 @@ def trainModel(alph, n_est):
                 print(count, end=' ')
     return hypertune
 
+
 with Parallel(n_jobs=18, prefer="threads") as parallel:
     result = parallel(delayed(trainModel)(alph, n_est) for alph, n_est in list(itertools.product(learning_rate, n_estimators)))
-
+    
 hypertune = {'Mean_RMSE': [float('Inf')], 'Test_RMSE': [float('Inf')]}
 for x in result:
     if x['Mean_RMSE'][0] < hypertune['Mean_RMSE'][0]:

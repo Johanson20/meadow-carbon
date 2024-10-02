@@ -180,7 +180,7 @@ for idx in range(data.shape[0]):
         flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-        slope_value = slope.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     mean_pr = tclimate['pr']
