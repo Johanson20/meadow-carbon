@@ -145,10 +145,6 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
-def landsat7SlcMask(image):
-    slc = image.focalMean(1, 'square', 'pixels', 8)
-    return slc.blend(image)
-
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -186,7 +182,7 @@ slope_11 = ee.Terrain.slope(dem).clip(sierra_zone).reproject(crs="EPSG:32611", s
 
 landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
-landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL']).map(landsat7SlcMask)
+landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
@@ -211,7 +207,7 @@ daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resamp
 
 def processMeadow(meadowIdx):
     start = datetime.now()
-    # extract a single meadow and it's geometry bounds; buffer inwards to remove trees by edges by designated amount
+    # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
     if feature.geometry.geom_type == 'Polygon':

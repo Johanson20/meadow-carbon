@@ -338,7 +338,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=100, subsample=0.7,
+bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=3, n_estimators=75, subsample=0.5,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
@@ -455,7 +455,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=12, n_estimators=100, subsample=0.3,
+agb_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=6, n_estimators=125, subsample=0.5,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
