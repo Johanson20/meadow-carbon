@@ -145,6 +145,16 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
+def filter_tasks_by_time(tasks, start_time):
+    filtered_tasks = []
+    for task in tasks:
+        task_creation_time = task.status()['creation_timestamp_ms']
+        if task_creation_time and task_creation_time >= start_time:
+            filtered_tasks.append(task)
+    print("Filtered all tasks!")
+    return filtered_tasks
+
+
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -190,7 +200,6 @@ gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).s
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
-tasks = []
 
 # re-run this part for each unique year
 year = 2021
@@ -204,6 +213,7 @@ terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "
 daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
 daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
 current_time = datetime.now().timestamp()*1000
+tasks = []
 
 
 def prepareMeadows(meadowIdx):
@@ -220,7 +230,15 @@ def prepareMeadows(meadowIdx):
     # convert landsat image collection over each meadow to list for iteration
     landsat_images = landsat_collection.filterBounds(shapefile_bbox)
     image_list = landsat_images.toList(landsat_images.size())
-    image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
+    try:
+        image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
+    except:
+        print(f"Meadow {meadowId} threw an exception!")
+        time.sleep(3)
+        try:
+            image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
+        except:
+            return -3
     dates = [date/1000 for date in image_result['image_dates']]
     noImages = len(dates)
     if not noImages:
@@ -291,6 +309,7 @@ def prepareMeadows(meadowIdx):
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):
             geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+            time.sleep(1)
     
     return noBands
 
@@ -420,13 +439,12 @@ if __name__ == "__main__":
     start = datetime.now()
     with multiprocessing.Pool(processes=60) as pool:
         bandresult = pool.map(prepareMeadows, allIdx)
-    
     print("Pre-processing of tasks completed!")
     
     meadowData = list(zip(allIdx, bandresult))
     tasks = ee.batch.Task.list()
+    tasks = filter_tasks_by_time(tasks, current_time)
     with multiprocessing.Pool(processes=60) as pool:
         result = pool.map(processMeadow, meadowData)
-    
     print(datetime.now() - start)
     print(f"Year {year} completed!")
