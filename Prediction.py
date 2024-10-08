@@ -189,8 +189,8 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-ncores = multiprocessing.cpu_count()
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+tasks = []
 
 # re-run this part for each unique year
 year = 2021
@@ -203,10 +203,10 @@ terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "
 terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
 daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
 daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
+current_time = datetime.now().timestamp()*1000
 
 
-def processMeadow(meadowIdx):
-    start = datetime.now()
+def prepareMeadows(meadowIdx):
     # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
@@ -236,13 +236,9 @@ def processMeadow(meadowIdx):
         flow_30m = flow_acc_10.clip(shapefile_bbox).toFloat()
         slope_30m = slope_10.clip(shapefile_bbox).toFloat()
         swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
-        
-    # dataframe to store results for each meadow
-    all_data = pd.DataFrame(columns=cols)
-    df = pd.DataFrame()
+    
     combined_image = None
-    image_names = set()
-    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
+    noBands = 14
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image and align data types (float32)
@@ -266,14 +262,14 @@ def processMeadow(meadowIdx):
         if idx == 0:     # extract constant values once for the same meadow
             combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
         else:
-            bandnames = bandnames.copy() + bandnames[:11]     # 11 total of recurring bands
+            noBands += 11     # 11 total of recurring bands
             combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
         print(idx, end=' ')
     print()
         
-    if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
+    if feature.Area_km2 > 11:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/10))
+        num_subregions = round(np.sqrt(feature.Area_km2/5))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = []
@@ -288,27 +284,66 @@ def processMeadow(meadowIdx):
                     subregions.append(subregion.intersection(shapefile_bbox))
 
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
-    current_time = datetime.now().timestamp()*1000
     for i, subregion in enumerate(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-        image_names.add(image_name[12:-4])
-        
-        if len(bandnames) < 1024 and feature.Area_km2 < 5:
-            # suppress output of downloaded images (image limit = 48 MB and downloads at most 1024 bands)
-            with contextlib.redirect_stdout(None):
+        if noBands < 1024 and feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
+            with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):
             geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
     
-    tasks = ee.batch.Task.list()
+    return noBands
+
+
+def processMeadow(meadowCues):
+    meadowIdx, noBands = meadowCues
+    if noBands <= 14:
+        return -1
+    feature = shapefile.loc[meadowIdx, :]
+    meadowId, mycrs = feature.ID, feature.crs
+        
+    # dataframe to store results for each meadow
+    all_data = pd.DataFrame(columns=cols)
+    df = pd.DataFrame()
+    image_names = set()
+    bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
+    subregions = 1
+        
+    if feature.Area_km2 > 11:     # split bounds of large meadows into subregions
+        xmin, ymin, xmax, ymax = feature.geometry.bounds
+        num_subregions = round(np.sqrt(feature.Area_km2/5))
+        subregion_width = (xmax - xmin) / num_subregions
+        subregion_height = (ymax - ymin) / num_subregions
+        for i in range(num_subregions):
+            for j in range(num_subregions):
+                subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
+                                   (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
+                if subarea.intersects(feature.geometry):
+                    subregions += 1
+
+    # process each image subregion and bandnames order
+    for i in range(subregions):
+        image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        image_names.add(image_name[12:-4])
+    while noBands > 14:
+        bandnames = bandnames.copy() + bandnames[:11]
+        noBands -= 11
+    
+    etasks = tasks.copy()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
         image_name = ["files/bands/" + imagename + ".tif" for imagename in image_names][0]
         if not os.path.exists(image_name):
+            etasks = [task for task in etasks if task.status()['description'] in image_names]
             isOngoing = True
-            filename = None
+            filename = ""
             while isOngoing:
-                for task in tasks:
+                newtasks = []
+                for t_k in range(len(etasks)):
+                    task = etasks[t_k]
                     if task.status()['description'] in image_names and task.status()['creation_timestamp_ms'] > current_time:
+                        newtasks.append(task)
                         if task.status()['state'] == 'COMPLETED':
                             filename = task.status()['description']
                             isOngoing = False
@@ -317,12 +352,15 @@ def processMeadow(meadowIdx):
                             isOngoing = False
                             break
                         else:
-                            time.sleep(0.1)
-            file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
-            for file in file_list:
-                if file['title'] == filename + ".tif":
-                    image_name = "files/bands/" + filename + ".tif"
-                    file.GetContentFile(image_name)
+                            time.sleep(2/len(image_names))
+                if not newtasks:
+                    isOngoing = False
+            if filename:
+                file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
+                for file in file_list:
+                    if file['title'] == filename + ".tif":
+                        image_name = "files/bands/" + filename + ".tif"
+                        file.GetContentFile(image_name)
         try:
             image_names.remove(image_name[12:-4])
             df = geotiffToCsv(image_name, bandnames)
@@ -368,14 +406,27 @@ def processMeadow(meadowIdx):
     else:
         print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
         meadowIdx = -2
-    print(datetime.now() - start)
     
     return meadowIdx
 
 
-# processMeadow(16489)   # (16450), 16538 (smallest)
+'''
+meadowIdx = 16489   # (16450), 16538 (smallest)
+noBands = prepareMeadows(meadowIdx)
+processMeadow((meadowIdx, noBands))
+'''
 if __name__ == "__main__":
     allIdx = shapefile.index
-    with multiprocessing.Pool(processes=ncores-12) as pool:
-        result = pool.map(processMeadow, allIdx)
+    start = datetime.now()
+    with multiprocessing.Pool(processes=60) as pool:
+        bandresult = pool.map(prepareMeadows, allIdx)
+    
+    print("Pre-processing of tasks completed!")
+    
+    meadowData = list(zip(allIdx, bandresult))
+    tasks = ee.batch.Task.list()
+    with multiprocessing.Pool(processes=60) as pool:
+        result = pool.map(processMeadow, meadowData)
+    
+    print(datetime.now() - start)
     print(f"Year {year} completed!")
