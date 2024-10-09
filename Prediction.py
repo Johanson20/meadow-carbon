@@ -233,11 +233,11 @@ def prepareMeadows(meadowIdx):
     try:
         image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
     except:
-        print(f"Meadow {meadowId} threw an exception!")
         time.sleep(3)
         try:
             image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
         except:
+            print(f"Meadow {meadowId} threw an exception!")
             return -3
     dates = [date/1000 for date in image_result['image_dates']]
     noImages = len(dates)
@@ -255,8 +255,8 @@ def prepareMeadows(meadowIdx):
         slope_30m = slope_10.clip(shapefile_bbox).toFloat()
         swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
     
-    combined_image = None
-    noBands = 14
+    combined_image, residue_image = None, None
+    noBands, bandnames1 = 14, 0
     subregions = [shapefile_bbox]
     
     # iterate through each landsat image and align data types (float32)
@@ -279,15 +279,22 @@ def prepareMeadows(meadowIdx):
         # align other satellite data with landsat and make resolution (30m)
         if idx == 0:     # extract constant values once for the same meadow
             combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
+            if noImages > 92:   # split image when bands would exceed 1024
+                bandnames1 = 14
+                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
         else:
-            noBands += 11     # 11 total of recurring bands
-            combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
+            if noBands < 1013:
+                noBands += 11     # 11 total of recurring bands
+                combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
+            else:
+                bandnames1 += 11
+                residue_image = residue_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
         print(idx, end=' ')
     print()
         
-    if feature.Area_km2 > 11:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
+    if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/5))
+        num_subregions = round(np.sqrt(feature.Area_km2/10))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = []
@@ -304,19 +311,22 @@ def prepareMeadows(meadowIdx):
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
         if noBands < 1024 and feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-        elif not os.path.exists(image_name):
-            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+                if bandnames1 > 14 and os.path.exists(image_name):
+                    geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
+        elif not os.path.exists(image_name):    # merge both images for g-drive download
+            geemap.ee_export_image_to_drive(combined_image.addBands(residue_image).clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             time.sleep(1)
     
-    return noBands
+    return noBands + bandnames1
 
 
 def processMeadow(meadowCues):
-    meadowIdx, noBands = meadowCues
-    if noBands <= 14:
+    meadowIdx, totalBands = meadowCues
+    if totalBands <= 14:
         return -1
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
@@ -324,13 +334,16 @@ def processMeadow(meadowCues):
     # dataframe to store results for each meadow
     all_data = pd.DataFrame(columns=cols)
     df = pd.DataFrame()
+    noBands = 1015 if totalBands > 1024 else totalBands
+    noBands1 = totalBands - noBands
     image_names = set()
     bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
+    bandnames1 = bandnames.copy() if totalBands > 1024 else []
     subregions = 1
         
-    if feature.Area_km2 > 11:     # split bounds of large meadows into subregions
+    if feature.Area_km2 > 22:     # split bounds of large meadows into subregions
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/5))
+        num_subregions = round(np.sqrt(feature.Area_km2/10))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         for i in range(num_subregions):
@@ -346,14 +359,26 @@ def processMeadow(meadowCues):
     for i in range(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         image_names.add(image_name[12:-4])
-    while noBands > 14:
-        bandnames = bandnames.copy() + bandnames[:11]
-        noBands -= 11
+        if totalBands > 1024:
+            extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
+            image_names.add(extra_image_name[12:-4])
+    
+    if totalBands < 1024:
+        while totalBands > 14:
+            bandnames = bandnames.copy() + bandnames[:11]
+            totalBands -= 11
+    else:
+        while noBands > 14:
+            bandnames = bandnames.copy() + bandnames[:11]
+            noBands -= 11
+        while noBands1 > 14:
+            bandnames1 = bandnames1.copy() + bandnames1[:11]
+            noBands1 -= 11
     
     etasks = tasks.copy()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
         image_name = ["files/bands/" + imagename + ".tif" for imagename in image_names][0]
-        if not os.path.exists(image_name):
+        if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
             etasks = [task for task in etasks if task.status()['description'] in image_names]
             isOngoing = True
             filename = ""
@@ -382,13 +407,16 @@ def processMeadow(meadowCues):
                         file.GetContentFile(image_name)
         try:
             image_names.remove(image_name[12:-4])
-            df = geotiffToCsv(image_name, bandnames)
+            if image_name.endswith('e.tif'):
+                df = geotiffToCsv(image_name, bandnames1)
+            else:
+                df = geotiffToCsv(image_name, bandnames)
         except:
             continue
         df = processGeotiff(df)
         all_data = pd.concat([all_data, df])
         df = pd.DataFrame()
-    print("Band data extraction done!")    
+    print("Band data extraction done!")
     all_data.head()
     
     if not all_data.empty:
