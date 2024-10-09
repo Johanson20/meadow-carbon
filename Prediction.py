@@ -84,8 +84,14 @@ def processGeotiff(df):
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
-    NA_Ids = df.isin([np.inf, -np.inf]).any(axis=1)
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    # landsat 7 scan lines leads to discrepancies between number of NAs for landsat and others
+    NA_Ids = df['Annual_Precipitation'].isna()
     df = df[~NA_Ids]
+    df = df.groupby(['X', 'Y']).apply(interpolate_pixel_group)
+    nan_rows = df[df.isna().any(axis=1)]
+    if not nan_rows.empty:
+        df = df.apply(lambda row: spatial_interpolate(row, df) if row.isna().any() else row, axis=1)
     df.dropna(inplace=True)
     df.drop_duplicates(inplace=True)
     df.reset_index(drop=True, inplace=True)
@@ -101,6 +107,19 @@ def processGeotiff(df):
     df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
     
     return df
+
+
+def interpolate_pixel_group(group):
+    # interpolate NA rows (landsat 7 scan lines) with nearest different date of same pixel
+    return group.interpolate(method='linear', axis=0, limit_direction='both')
+
+
+def spatial_interpolate(row, df):
+    # interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date 
+    nearest_values = df[(df['date'] == row['date']) & (df['pixel_id'] != row['pixel_id'])].dropna()
+    if not nearest_values.empty:
+        row.fillna(nearest_values.median(), inplace=True)
+    return row
 
 
 def interpolate_group(group):
@@ -157,6 +176,7 @@ def filter_tasks_by_time(tasks, start_time):
 
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
+
 
 def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
@@ -312,13 +332,17 @@ def prepareMeadows(meadowIdx):
     for i, subregion in enumerate(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
-        if noBands < 1024 and feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
+        if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                 if bandnames1 > 14 and os.path.exists(image_name):
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):    # merge both images for g-drive download
-            geemap.ee_export_image_to_drive(combined_image.addBands(residue_image).clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+            if bandnames1 > 14:
+                total_image = combined_image.addBands(residue_image)
+            else:
+                total_image = combined_image
+            geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             time.sleep(1)
     
     return noBands + bandnames1
