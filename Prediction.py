@@ -86,7 +86,7 @@ def processGeotiff(df):
     df.columns = cols[:-7]
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies between number of NAs for landsat and others
-    NA_Ids = df['Annual_Precipitation'].isna()
+    NA_Ids = df['Minimum_temperature'].isna()
     df = df[~NA_Ids]
     df = df.groupby(['X', 'Y']).apply(interpolate_pixel_group)
     nan_rows = df[df.isna().any(axis=1)]
@@ -116,9 +116,15 @@ def interpolate_pixel_group(group):
 
 def spatial_interpolate(row, df):
     # interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date 
-    nearest_values = df[(df['date'] == row['date']) & (df['pixel_id'] != row['pixel_id'])].dropna()
+    nearest_values = df[(df['Date'] == row['Date']) & ((df['X'] != row['X']) | (df['Y'] != row['Y']))].dropna()
     if not nearest_values.empty:
         row.fillna(nearest_values.median(), inplace=True)
+    else:
+        other_values = df[(df['X'] != row['X']) | (df['Y'] != row['Y'])].dropna()
+        if not other_values.empty:  # use ~30 day radius of different pixel
+            next_close_values = other_values[abs(other_values['Date'] - row['Date']) < 2.6e6]
+            if not next_close_values.empty:
+                row.fillna(next_close_values.median(), inplace=True)
     return row
 
 
@@ -336,7 +342,7 @@ def prepareMeadows(meadowIdx):
                     extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):    # merge both images for g-drive download
-            if bandnames1 > 14:
+            if bandnames1 > 14 and residue_image is not None:
                 total_image = combined_image.addBands(residue_image)
             else:
                 total_image = combined_image
