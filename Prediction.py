@@ -165,12 +165,13 @@ def maskAndRename(image):
 
 
 def filter_tasks_by_time(tasks, start_time):
+    start = datetime.now()
     filtered_tasks = []
     for task in tasks:
         task_creation_time = task.status()['creation_timestamp_ms']
         if task_creation_time and task_creation_time >= start_time:
             filtered_tasks.append(task)
-    print("Filtered all tasks!")
+    print(f"Filtered all tasks in time: {datetime.now() - start}")
     return filtered_tasks
 
 
@@ -262,7 +263,6 @@ def prepareMeadows(meadowIdx):
     dates = [date/1000 for date in image_result['image_dates']]
     noImages = len(dates)
     if not noImages:
-        print('meadowId = {}, at index: {} is too small for data extraction'.format(meadowId, meadowIdx))
         return -1
     
     # clip flow, slope and daymet to meadow's bounds
@@ -309,9 +309,7 @@ def prepareMeadows(meadowIdx):
             else:
                 bandnames1 += 11
                 residue_image = residue_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
-        print(idx, end=' ')
-    print()
-        
+    
     if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
         xmin, ymin, xmax, ymax = feature.geometry.bounds
         num_subregions = round(np.sqrt(feature.Area_km2/10))
@@ -331,18 +329,21 @@ def prepareMeadows(meadowIdx):
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-        extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
         if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                 if bandnames1 > 14 and os.path.exists(image_name):
+                    extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         elif not os.path.exists(image_name):    # merge both images for g-drive download
             if bandnames1 > 14:
                 total_image = combined_image.addBands(residue_image)
             else:
                 total_image = combined_image
-            geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+            try:
+                geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+            except:
+                continue
             time.sleep(1)
     
     return noBands + bandnames1
@@ -440,7 +441,6 @@ def processMeadow(meadowCues):
         df = processGeotiff(df)
         all_data = pd.concat([all_data, df])
         df = pd.DataFrame()
-    print("Band data extraction done!")
     all_data.head()
     
     if not all_data.empty:
@@ -459,7 +459,6 @@ def processMeadow(meadowCues):
         all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
         all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
         all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
-        print("Predictions and interpolations done!")
         
         # make geodataframe of predictions and projected coordinates as crs; convert to raster
         utm_lons, utm_lats = all_data['X'], all_data['Y']
@@ -470,12 +469,10 @@ def processMeadow(meadowCues):
             response_col = out_rasters[i][1]
             pixel_values = all_data[response_col]
             gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
-            gdf.plot(column=response_col, cmap='viridis', legend=True)
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
         all_data.to_csv(f'files/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
     else:
-        print('meadowId = {}, at index = {} had no valid data rows for prediction and interpolation'.format(meadowId, meadowIdx))
         meadowIdx = -2
     
     return meadowIdx
