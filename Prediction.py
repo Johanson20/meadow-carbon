@@ -35,10 +35,9 @@ ee.Initialize()
 
 # Authenticate and create the PyDrive client for google drive access
 gauth = GoogleAuth()
-# gauth.CommandLineAuth()  # Creates local webserver and auto handles authentication (only do it once).
 gauth.LoadCredentialsFile("mycreds.txt")
 if gauth.credentials is None:   # Authenticate if there are no valid credentials
-    gauth.CommandLineAuth()
+    gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
 elif gauth.access_token_expired:    # Refresh the credentials if they are expired
     gauth.Refresh()
 else:   # Load the existing credentials
@@ -170,17 +169,6 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
-def filter_tasks_by_time(tasks, start_time):
-    start = datetime.now()
-    filtered_tasks = []
-    for task in tasks:
-        task_creation_time = task.status()['creation_timestamp_ms']
-        if task_creation_time and task_creation_time >= start_time:
-            filtered_tasks.append(task)
-    print(f"Filtered all tasks in time: {datetime.now() - start}")
-    return filtered_tasks
-
-
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -239,8 +227,7 @@ terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "
 terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
 daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
 daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
-current_time = datetime.now().timestamp()*1000
-tasks = []
+current_time = datetime.strptime('10/10/2024', '%d/%m/%Y').timestamp()*1000
 
 
 def prepareMeadows(meadowIdx):
@@ -406,17 +393,17 @@ def processMeadow(meadowCues):
             bandnames1 = bandnames1.copy() + bandnames1[:11]
             noBands1 -= 11
     
-    etasks = tasks.copy()
+    tasks = [task for task in tasks if year in task.config['description']]
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
         image_name = ["files/bands/" + imagename + ".tif" for imagename in image_names][0]
         if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
-            etasks = [task for task in etasks if task.status()['description'] in image_names]
+            tasks = [task for task in tasks if task.config['description'] in image_names]
             isOngoing = True
             filename = ""
             while isOngoing:
                 newtasks = []
-                for t_k in range(len(etasks)):
-                    task = etasks[t_k]
+                for t_k in range(len(tasks)):
+                    task = tasks[t_k]
                     if task.status()['description'] in image_names and task.status()['creation_timestamp_ms'] > current_time:
                         newtasks.append(task)
                         if task.status()['state'] == 'COMPLETED':
@@ -451,6 +438,8 @@ def processMeadow(meadowCues):
     
     if not all_data.empty:
         # select relevant columns, predict GHG and interpolate daily values
+        all_data.replace([np.inf, -np.inf], np.nan, inplace=True)
+        all_data.dropna(inplace=True)
         all_data.drop_duplicates(inplace=True)
         all_data.reset_index(drop=True, inplace=True)
         all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
@@ -498,7 +487,6 @@ if __name__ == "__main__":
     
     meadowData = list(zip(allIdx, bandresult))
     tasks = ee.batch.Task.list()
-    tasks = filter_tasks_by_time(tasks, current_time)
     with multiprocessing.Pool(processes=60) as pool:
         result = pool.map(processMeadow, meadowData)
     print(datetime.now() - start)
