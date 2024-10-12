@@ -28,23 +28,25 @@ mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
-
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
 
-# Authenticate and create the PyDrive client for google drive access
-gauth = GoogleAuth()
-gauth.LoadCredentialsFile("mycreds.txt")
-if gauth.credentials is None:   # Authenticate if there are no valid credentials
-    gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
-elif gauth.access_token_expired:    # Refresh the credentials if they are expired
-    gauth.Refresh()
-else:   # Load the existing credentials
-    gauth.Authorize()
-# Save the credentials for the next run
-gauth.SaveCredentialsFile("mycreds.txt")
-drive = GoogleDrive(gauth)
+
+def G_driveAccess():
+    global gauth, drive
+    # Authenticate and create the PyDrive client for google drive access
+    gauth = GoogleAuth()
+    gauth.LoadCredentialsFile("mycreds.txt")
+    if gauth.credentials is None:   # Authenticate if there are no valid credentials
+        gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
+    elif gauth.access_token_expired:    # Refresh the credentials if they are expired
+        gauth.Refresh()
+    else:   # Load the existing credentials
+        gauth.Authorize()
+    # Save the credentials for the next run
+    gauth.SaveCredentialsFile("mycreds.txt")
+    drive = GoogleDrive(gauth)
 
 
 def geotiffToCsv(input_raster, bandnames):
@@ -169,6 +171,21 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
+def loadYearCollection(year):
+    global date_range, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, daymet_10, daymet_11
+    start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
+    date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
+    landsat_collection = landsat.filterDate(start_year, end_year)
+    gridmet_10 = gridmet.filterDate(start_year, end_year).map(resample10)
+    gridmet_11 = gridmet.filterDate(start_year, end_year).map(resample11)
+    terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample10)
+    terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
+    daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
+    daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
+    os.makedirs(f"files/{year}", exist_ok=True)
+    os.makedirs(f"files/bands/{year}", exist_ok=True)
+    
+
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -215,20 +232,12 @@ gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).s
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+G_driveAccess()
+current_time = datetime.strptime('10/10/2024', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
-start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
-date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
-landsat_collection = landsat.filterDate(start_year, end_year)
-gridmet_10 = gridmet.filterDate(start_year, end_year).map(resample10)
-gridmet_11 = gridmet.filterDate(start_year, end_year).map(resample11)
-terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample10)
-terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
-daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
-daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
-current_time = datetime.strptime('10/10/2024', '%d/%m/%Y').timestamp()*1000
-
+loadYearCollection(year)
 
 def prepareMeadows(meadowIdx):
     # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
@@ -321,7 +330,7 @@ def prepareMeadows(meadowIdx):
 
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
-        image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        image_name = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
         if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
@@ -334,10 +343,9 @@ def prepareMeadows(meadowIdx):
             else:
                 total_image = combined_image
             try:
-                geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[12:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+                geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             except:
                 continue
-            time.sleep(1)
     
     return noBands + bandnames1
 
@@ -375,11 +383,11 @@ def processMeadow(meadowCues):
 
     # process each image subregion and bandnames order
     for i in range(subregions):
-        image_name = f'files/bands/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-        image_names.add(image_name[12:-4])
+        image_name = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+        image_names.add(image_name[17:-4])
         if totalBands > 1024:
             extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
-            image_names.add(extra_image_name[12:-4])
+            image_names.add(extra_image_name[17:-4])
     
     if totalBands < 1024:
         while totalBands > 14:
@@ -393,9 +401,10 @@ def processMeadow(meadowCues):
             bandnames1 = bandnames1.copy() + bandnames1[:11]
             noBands1 -= 11
     
-    tasks = [task for task in tasks if year in task.config['description']]
+    if not 'tasks' in globals():
+        tasks = ee.batch.Task.list()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
-        image_name = ["files/bands/" + imagename + ".tif" for imagename in image_names][0]
+        image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
         if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
             tasks = [task for task in tasks if task.config['description'] in image_names]
             isOngoing = True
@@ -411,8 +420,9 @@ def processMeadow(meadowCues):
                             isOngoing = False
                             break
                         elif task.status()['state'] == 'FAILED':
-                            isOngoing = False
-                            break
+                            if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
+                                isOngoing = False
+                            continue
                         else:
                             time.sleep(2/len(image_names))
                 if not newtasks:
@@ -421,10 +431,10 @@ def processMeadow(meadowCues):
                 file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
                 for file in file_list:
                     if file['title'] == filename + ".tif":
-                        image_name = "files/bands/" + filename + ".tif"
+                        image_name = f"files/bands/{year}/{filename}.tif"
                         file.GetContentFile(image_name)
         try:
-            image_names.remove(image_name[12:-4])
+            image_names.remove(image_name[17:-4])
             if image_name.endswith('e.tif'):
                 df = geotiffToCsv(image_name, bandnames1)
             else:
@@ -460,13 +470,13 @@ def processMeadow(meadowCues):
         res = 30
         out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'Rh'], 3: ['NEP.tif', 'NEP']}
         for i in range(4):
-            out_raster = f'files/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
+            out_raster = f'files/{year}/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
             response_col = out_rasters[i][1]
             pixel_values = all_data[response_col]
             gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
             out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
             out_grd.rio.to_raster(out_raster)
-        all_data.to_csv(f'files/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
+        all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
     else:
         meadowIdx = -2
     
@@ -481,13 +491,28 @@ processMeadow((meadowIdx, noBands))
 if __name__ == "__main__":
     allIdx = shapefile.index
     start = datetime.now()
-    with multiprocessing.Pool(processes=60) as pool:
-        bandresult = pool.map(prepareMeadows, allIdx)
-    print("Pre-processing of tasks completed!")
-    
-    meadowData = list(zip(allIdx, bandresult))
-    tasks = ee.batch.Task.list()
-    with multiprocessing.Pool(processes=60) as pool:
-        result = pool.map(processMeadow, meadowData)
+    years = range(1984, 2025)
+    for year in years[-6:-1]:
+        loadYearCollection(year)
+        with multiprocessing.Pool(processes=60) as pool:
+            bandresult = pool.map(prepareMeadows, allIdx)
+        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+            pickle.dump(bandresult, f)
+        print(f"Pre-processing of tasks for {year} completed!")
     print(datetime.now() - start)
-    print(f"Year {year} completed!")
+    
+    for year in years[-6:-1]:
+        start = datetime.now()
+        ee.Initialize()
+        G_driveAccess()
+        loadYearCollection(year)
+        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
+            bandresult = pickle.load(f)
+        meadowData = list(zip(allIdx, bandresult))
+        tasks = ee.batch.Task.list()
+        tasks = [task for task in tasks if year in task.config['description']]
+        with multiprocessing.Pool(processes=60) as pool:
+            result = pool.map(processMeadow, meadowData)
+        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
+            pickle.dump(result, f)
+        print(f"Year {year} completed in {datetime.now() - start}")
