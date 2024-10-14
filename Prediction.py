@@ -7,16 +7,16 @@ Created on Mon Apr 22 11:03:25 2024
 
 import os
 import time
-import ee
 import numpy as np
 import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
-import geemap
-import multiprocessing
+from joblib import Parallel, delayed
 import contextlib
 import rioxarray as xr
+import ee
+import geemap
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from geocube.api.core import make_geocube
@@ -34,7 +34,7 @@ ee.Initialize()
 
 
 def G_driveAccess():
-    global gauth, drive
+    global drive
     # Authenticate and create the PyDrive client for google drive access
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
@@ -240,6 +240,8 @@ year = 2021
 loadYearCollection(year)
 
 def prepareMeadows(meadowIdx):
+    os.chdir(mydir)
+    ee.Initialize()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
@@ -337,7 +339,7 @@ def prepareMeadows(meadowIdx):
                 if bandnames1 > 14 and os.path.exists(image_name):
                     extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-        elif not os.path.exists(image_name):    # merge both images for g-drive download
+        if not os.path.exists(image_name):    # merge both images for g-drive download
             if bandnames1 > 14 and residue_image is not None:
                 total_image = combined_image.addBands(residue_image)
             else:
@@ -351,6 +353,8 @@ def prepareMeadows(meadowIdx):
 
 
 def processMeadow(meadowCues):
+    os.chdir(mydir)
+    G_driveAccess()
     meadowIdx, totalBands = meadowCues
     if totalBands <= 14:
         return -1
@@ -402,6 +406,7 @@ def processMeadow(meadowCues):
             noBands1 -= 11
     
     if not 'tasks' in globals():
+        ee.Initialize()
         tasks = ee.batch.Task.list()
     while image_names:    # read in each downloaded image, process and stack them into a dataframe
         image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
@@ -488,31 +493,30 @@ meadowIdx = 16489   # (16450), 16538 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
-if __name__ == "__main__":
-    allIdx = shapefile.index
+allIdx = shapefile.index
+start = datetime.now()
+years = range(1984, 2025)
+for year in years[-6:-1]:
+    loadYearCollection(year)
+    with Parallel(n_jobs=72, prefer="processes") as parallel:
+        bandresult = parallel(delayed(prepareMeadows)(meadowIdx) for meadowIdx in allIdx)
+    with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+        pickle.dump(bandresult, f)
+    print(f"Pre-processing of tasks for {year} completed!")
+print(datetime.now() - start)
+
+for year in years[-6:-1]:
     start = datetime.now()
-    years = range(1984, 2025)
-    for year in years[-6:-1]:
-        loadYearCollection(year)
-        with multiprocessing.Pool(processes=60) as pool:
-            bandresult = pool.map(prepareMeadows, allIdx)
-        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
-            pickle.dump(bandresult, f)
-        print(f"Pre-processing of tasks for {year} completed!")
-    print(datetime.now() - start)
-    
-    for year in years[-6:-1]:
-        start = datetime.now()
-        ee.Initialize()
-        G_driveAccess()
-        loadYearCollection(year)
-        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
-            bandresult = pickle.load(f)
-        meadowData = list(zip(allIdx, bandresult))
-        tasks = ee.batch.Task.list()
-        tasks = [task for task in tasks if year in task.config['description']]
-        with multiprocessing.Pool(processes=60) as pool:
-            result = pool.map(processMeadow, meadowData)
-        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
-            pickle.dump(result, f)
-        print(f"Year {year} completed in {datetime.now() - start}")
+    ee.Initialize()
+    G_driveAccess()
+    loadYearCollection(year)
+    with open(f'files/{year}/bandresult.pckl', 'rb') as f:
+        bandresult = pickle.load(f)
+    meadowData = list(zip(allIdx, bandresult))
+    tasks = ee.batch.Task.list()
+    tasks = [task for task in tasks if year in task.config['description']]
+    with Parallel(n_jobs=72, prefer="processes") as parallel:
+        result = parallel(delayed(processMeadow)((meadowIdx, noBands)) for meadowIdx, noBands in meadowData)
+    with open(f'files/{year}/finalresult.pckl', 'wb') as f:
+        pickle.dump(result, f)
+    print(f"Year {year} completed in {datetime.now() - start}")
