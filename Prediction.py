@@ -202,7 +202,7 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-09-06.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-10-14.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
@@ -241,8 +241,6 @@ year = 2021
 loadYearCollection(year)
 
 def prepareMeadows(meadowIdx):
-    os.chdir(mydir)
-    ee.Initialize()
     # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
     feature = shapefile.loc[meadowIdx, :]
     meadowId, mycrs = feature.ID, feature.crs
@@ -337,9 +335,17 @@ def prepareMeadows(meadowIdx):
         if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
+                if not os.path.exists(image_name):
+                    time.sleep(1.5)
+                    with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                        geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                 if bandnames1 > 14 and os.path.exists(image_name):
                     extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
+                    if not os.path.exists(extra_image_name):
+                        time.sleep(1.5)
+                        with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                            geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         if not os.path.exists(image_name):    # merge both images for g-drive download
             if bandnames1 > 14 and residue_image is not None:
                 total_image = combined_image.addBands(residue_image)
@@ -354,8 +360,6 @@ def prepareMeadows(meadowIdx):
 
 
 def processMeadow(meadowCues):
-    os.chdir(mydir)
-    G_driveAccess()
     meadowIdx, totalBands = meadowCues
     if totalBands <= 14:
         return -1
@@ -516,7 +520,7 @@ if __name__ == "__main__":
             bandresult = pickle.load(f)
         meadowData = list(zip(allIdx, bandresult))
         tasks = ee.batch.Task.list()
-        tasks = [task for task in tasks if year in task.config['description']]
+        tasks = [task for task in tasks if str(year) in task.config['description']]
         with multiprocessing.Pool(processes=60) as pool:
             result = pool.map(processMeadow, meadowData)
         with open(f'files/{year}/finalresult.pckl', 'wb') as f:

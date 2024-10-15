@@ -101,7 +101,7 @@ def getPeakBandValues(point, year, sortAscending=False):
     integrals = df_daily[df_daily.NDSI <= 0.2]
     # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5)
     no_snow_days = len(date_range) - integrals.shape[0]
-    no_wet_days = df_daily[df_daily.NDWI > 0.5].shape[0]
+    no_wet_days = integrals[integrals.NDWI > 0.5].shape[0]
     integrals = integrals.sum()
 
     return [band_values, integrals, no_snow_days, no_wet_days]
