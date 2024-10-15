@@ -12,7 +12,7 @@ import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
-from joblib import Parallel, delayed
+import multiprocessing
 import contextlib
 import rioxarray as xr
 import ee
@@ -233,6 +233,7 @@ terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sier
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
+allIdx = shapefile.index
 current_time = datetime.strptime('10/10/2024', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
@@ -493,30 +494,31 @@ meadowIdx = 16489   # (16450), 16538 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
-allIdx = shapefile.index
-start = datetime.now()
-years = range(1984, 2025)
-for year in years[-6:-1]:
-    loadYearCollection(year)
-    with Parallel(n_jobs=72, prefer="processes") as parallel:
-        bandresult = parallel(delayed(prepareMeadows)(meadowIdx) for meadowIdx in allIdx)
-    with open(f'files/{year}/bandresult.pckl', 'wb') as f:
-        pickle.dump(bandresult, f)
-    print(f"Pre-processing of tasks for {year} completed!")
-print(datetime.now() - start)
-
-for year in years[-6:-1]:
+if __name__ == "__main__":
     start = datetime.now()
-    ee.Initialize()
-    G_driveAccess()
-    loadYearCollection(year)
-    with open(f'files/{year}/bandresult.pckl', 'rb') as f:
-        bandresult = pickle.load(f)
-    meadowData = list(zip(allIdx, bandresult))
-    tasks = ee.batch.Task.list()
-    tasks = [task for task in tasks if year in task.config['description']]
-    with Parallel(n_jobs=72, prefer="processes") as parallel:
-        result = parallel(delayed(processMeadow)((meadowIdx, noBands)) for meadowIdx, noBands in meadowData)
-    with open(f'files/{year}/finalresult.pckl', 'wb') as f:
-        pickle.dump(result, f)
-    print(f"Year {year} completed in {datetime.now() - start}")
+    years = range(1984, 2025)
+    for year in years[-6:-1]:
+        ee.Initialize()
+        loadYearCollection(year)
+        with multiprocessing.Pool(processes=60) as pool:
+            bandresult = pool.map(prepareMeadows, allIdx)
+        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+            pickle.dump(bandresult, f)
+        print(f"Pre-processing of tasks for {year} completed!")
+    print(datetime.now() - start)
+    
+    for year in years[-6:-1]:
+        start = datetime.now()
+        ee.Initialize()
+        G_driveAccess()
+        loadYearCollection(year)
+        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
+            bandresult = pickle.load(f)
+        meadowData = list(zip(allIdx, bandresult))
+        tasks = ee.batch.Task.list()
+        tasks = [task for task in tasks if year in task.config['description']]
+        with multiprocessing.Pool(processes=60) as pool:
+            result = pool.map(processMeadow, meadowData)
+        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
+            pickle.dump(result, f)
+        print(f"Year {year} completed in {datetime.now() - start}")
