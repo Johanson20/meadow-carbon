@@ -14,6 +14,8 @@ import ee
 import geemap
 from shapely.geometry import Polygon
 from osgeo import gdal, osr
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
 from geocube.api.core import make_geocube
 
 
@@ -110,3 +112,32 @@ def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4269):
     out_csv.to_csv(csvfile, encoding='utf-8', index=False)
 
 # geotiffToCsv("Treemap.tif", "out_xyz.csv", "", 32611)
+
+
+def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"):
+    gauth = GoogleAuth()
+    gauth.LoadCredentialsFile("mycreds.txt")
+    if gauth.credentials is None:   # Authenticate if there are no valid credentials
+        gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
+    elif gauth.access_token_expired:    # Refresh the credentials if they are expired
+        gauth.Refresh()
+    else:   # Load the existing credentials
+        gauth.Authorize()
+    # Save the credentials for the next run
+    gauth.SaveCredentialsFile("mycreds.txt")
+    drive = GoogleDrive(gauth)
+    # list all files in the google drive folder with nameId in title
+    file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{nameId}'"}).GetList() 
+    if subfolder:
+        subfolder += "/"
+    if delete:
+        for file in file_list:
+            file.Delete()
+    else:
+        for file in file_list:
+            image_name = f"files/bands/{subfolder}{file['title']}"
+            if not os.path.exists(image_name):
+                file.GetContentFile(image_name)
+
+# downloadDriveGeotiffs('meadow_2019', False, "2019")
+# downloadDriveGeotiffs('meadow_2019', True)

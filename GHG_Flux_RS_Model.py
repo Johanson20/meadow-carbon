@@ -179,7 +179,8 @@ data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Blue']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Blue'])
 data['NDPI'] = (data['NIR'] - (0.56*data['Red'] + 0.44*data['SWIR_2']))/(data['NIR'] + 0.56*data['Red'] + 0.44*data['SWIR_2'])
 
-# drop unnamed column and display first 5 rows of updated dataframe
+# display first 5 rows of updated dataframe
+data.reset_index(drop=True, inplace=True)
 data.head()
 
 # checks how many pixels are cloud free (non-null value);
@@ -214,6 +215,7 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols[8:] if c not in ['Elevation', 'Driver', 'Days_of_data_acquisition_offset']]
 y_field = 'CO2.umol.m2.s'
+data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
@@ -265,7 +267,7 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=9, n_estimators=750, subsample=0.7,
+ghg_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=6, n_estimators=750, subsample=1,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 ghg_model.fit(X_train, y_train)

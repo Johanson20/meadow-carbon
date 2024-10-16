@@ -303,6 +303,7 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col =  list(cols[27:-2]) + ['dNDPI']
 y_field = 'Roots.kg.m2'
+data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
@@ -310,12 +311,12 @@ subdata = data.loc[:, ([y_field] + var_col)]
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
-# if NAs where found (results above are not 0) in one of them (e.g. Y)
-nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
-data.drop(nullIds, inplace = True)
 # drop values with root biomass greater than 12 (outliers)
 # outlierIds = data[data[y_field] > 12].index
 # data.drop(outlierIds, inplace = True)
+# if NAs where found (results above are not 0) in one of them (e.g. Y)
+nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
+data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
@@ -338,7 +339,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=3, n_estimators=75, subsample=0.5,
+bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=11, n_estimators=75, subsample=0.4,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
@@ -354,7 +355,9 @@ len(bgb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = bgb_model.predict(X_train)
+y_train_pred[np.where(y_train_pred < 0)] = 0
 y_test_pred = bgb_model.predict(X_test)
+y_test_pred[np.where(y_test_pred < 0)] = 0
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -409,7 +412,6 @@ plotFeatureImportance()
 plotY()
 
 
-
 # same procedure as above
 data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
 data.head()
@@ -423,6 +425,7 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = list(cols[25:-2]) + ['dNDPI']
 y_field = 'HerbBio.g.m2'
+data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
@@ -455,7 +458,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=6, n_estimators=125, subsample=0.5,
+agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=6, n_estimators=50, subsample=0.7,
                                        validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                        verbose=1, random_state=10)
 agb_model.fit(X_train, y_train)
@@ -471,7 +474,9 @@ len(agb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = agb_model.predict(X_train)
+y_train_pred[np.where(y_train_pred < 0)] = 0
 y_test_pred = agb_model.predict(X_test)
+y_test_pred[np.where(y_test_pred < 0)] = 0
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
