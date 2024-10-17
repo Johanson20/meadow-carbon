@@ -215,7 +215,6 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols[8:] if c not in ['Elevation', 'Driver', 'Days_of_data_acquisition_offset']]
 y_field = 'CO2.umol.m2.s'
-data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 

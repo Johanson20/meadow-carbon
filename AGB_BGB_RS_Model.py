@@ -303,7 +303,6 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col =  list(cols[27:-2]) + ['dNDPI']
 y_field = 'Roots.kg.m2'
-data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
@@ -355,9 +354,7 @@ len(bgb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = bgb_model.predict(X_train)
-y_train_pred[np.where(y_train_pred < 0)] = 0
 y_test_pred = bgb_model.predict(X_test)
-y_test_pred[np.where(y_test_pred < 0)] = 0
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -425,7 +422,6 @@ data.drop_duplicates(inplace=True)
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = list(cols[25:-2]) + ['dNDPI']
 y_field = 'HerbBio.g.m2'
-data[data[y_field] < 0].loc[:, y_field] = 0
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
@@ -474,9 +470,7 @@ len(agb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
 y_train_pred = agb_model.predict(X_train)
-y_train_pred[np.where(y_train_pred < 0)] = 0
 y_test_pred = agb_model.predict(X_test)
-y_test_pred[np.where(y_test_pred < 0)] = 0
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))

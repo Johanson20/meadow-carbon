@@ -6,7 +6,6 @@ Created on Tue May 21 15:55:04 2024
 """
 
 import itertools
-import numpy as np
 from math import sqrt
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_squared_error
@@ -32,9 +31,7 @@ def trainModel(alph, n_est):
             gbm_model.fit(X_train, y_train)
             
             y_train_pred = gbm_model.predict(X_train)
-            y_train_pred[np.where(y_train_pred < 0)] = 0
             y_test_pred = gbm_model.predict(X_test)
-            y_test_pred[np.where(y_test_pred < 0)] = 0
             train_rmse = sqrt(mean_squared_error(y_train, y_train_pred))
             val = (y_train_pred - y_train) / y_train
             test_rmse = sqrt(mean_squared_error(y_test, y_test_pred))
