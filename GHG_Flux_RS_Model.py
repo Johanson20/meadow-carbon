@@ -223,6 +223,9 @@ subdata = data.loc[:, ([y_field] + var_col)]
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
+# drop C02 values less than -1
+outlierIds = data[data[y_field] < -1].index
+data.drop(outlierIds, inplace = True)
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds =  list(np.where(subdata[y_field].isnull())[0])    # null IDs
 data.drop(nullIds, inplace = True)

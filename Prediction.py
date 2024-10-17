@@ -203,7 +203,7 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-10-14.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-10-16.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
@@ -235,7 +235,7 @@ daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).sel
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('10/10/2024', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('17/10/2024', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -511,7 +511,7 @@ def processMeadow(meadowCues):
         return -4
 
 '''
-meadowIdx = 16489   # (16450), 16538 (smallest)
+meadowIdx = 16461   # (16422), 16510 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
