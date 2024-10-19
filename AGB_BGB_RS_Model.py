@@ -338,10 +338,14 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=11, n_estimators=75, subsample=0.4,
-                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=10)
+bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=11, n_estimators=100, subsample=0.4, validation_fraction=0.2,
+                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=11, 
+                                      n_estimators=100, subsample=0.4, validation_fraction=0.2, n_iter_no_change=50,  
+                                      max_features='log2', random_state=10)
+
 bgb_model.fit(X_train, y_train)
+bgb_84_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
     for i in range(len(var_col)):
@@ -454,10 +458,13 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=6, n_estimators=50, subsample=0.7,
-                                       validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                       verbose=1, random_state=10)
+agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=6, n_estimators=50, subsample=0.7, validation_fraction=0.2,
+                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.07, alpha=0.8413, max_depth=6, 
+                                      n_estimators=50, subsample=0.7, validation_fraction=0.2, n_iter_no_change=50,  
+                                      max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
+agb_84_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
     for i in range(len(var_col)):
@@ -514,6 +521,9 @@ plotY()
 
 f = open('csv/models.pckl', 'wb')
 pickle.dump([ghg_model, agb_model, bgb_model], f)
+f.close()
+f = open('csv/sd_models.pckl', 'wb')
+pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
 f.close()
 
 

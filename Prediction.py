@@ -148,10 +148,11 @@ def interpolate_group(group):
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
     # actively growing vegetation is when NDVI >= 0.2
-    resp = group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s']
+    resp = group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_Rh']]
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
-    group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
-    group['Rh'] = sum(group['CO2.umol.m2.s'])*12.01*60*60*24/1e6
+    group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_Rh']] = resp
+    group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_Rh'])]
+    group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
     group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month']), axis=1, inplace=True)
     
@@ -198,6 +199,9 @@ def resample11(image):
 #load ML GBM models
 f = open('csv/models.pckl', 'rb')
 ghg_model, agb_model, bgb_model = pickle.load(f)
+f.close()
+f = open('csv/sd_models.pckl', 'rb')
+ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
 f.close()
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
 
@@ -416,7 +420,6 @@ def processMeadow(meadowCues):
                 noBands1 -= 11
         
         if not 'tasks' in globals():
-            ee.Initialize()
             tasks = ee.batch.Task.list()
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
@@ -479,29 +482,38 @@ def processMeadow(meadowCues):
             all_data.drop_duplicates(inplace=True)
             all_data.reset_index(drop=True, inplace=True)
             all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
+            sd_1 = ghg_84_model.predict(all_data.loc[:, ghg_col])
+            all_data['1SD_Rh'] = sd_1 - all_data['CO2.umol.m2.s']
             all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
             all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
     
             # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
             all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
             all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, bgb_col])
+            sd_1 = agb_84_model.predict(all_data.loc[:, agb_col])
+            all_data['1SD_ANPP'] = sd_1 - all_data['HerbBio.g.m2']
+            sd_1 = bgb_84_model.predict(all_data.loc[:, bgb_col])
+            all_data['1SD_BNPP'] = sd_1 - all_data['Roots.kg.m2']
             all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
             all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
             all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
             all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
+            all_data['1SD_BNPP'] *= 0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
+            all_data['1SD_ANPP'] *= 0.433
             all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
             
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
-            out_rasters = {0: ['AGB.tif', 'HerbBio.g.m2'], 1: ['BGB.tif', 'Roots.kg.m2'], 2: ['GHG.tif', 'Rh'], 3: ['NEP.tif', 'NEP']}
-            for i in range(4):
+            out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh']]
+            for i in range(7):
                 out_raster = f'files/{year}/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
+                gdf.plot(column=response_col, cmap='viridis', legend=True)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
         else:
             meadowIdx = -2
