@@ -513,7 +513,6 @@ def processMeadow(meadowCues):
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
-                gdf.plot(column=response_col, cmap='viridis', legend=True)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
         else:
             meadowIdx = -2
