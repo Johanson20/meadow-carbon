@@ -33,9 +33,7 @@ def trainModel(alph, n_est):
             y_train_pred = gbm_model.predict(X_train)
             y_test_pred = gbm_model.predict(X_test)
             train_rmse = sqrt(mean_squared_error(y_train, y_train_pred))
-            val = (y_train_pred - y_train) / y_train
             test_rmse = sqrt(mean_squared_error(y_test, y_test_pred))
-            val = (y_test_pred - y_test) / y_test
             mean_rmse = (train_rmse + test_rmse)/2
            
             if mean_rmse < hypertune['Mean_RMSE'][0]:

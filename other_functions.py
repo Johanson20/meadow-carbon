@@ -141,3 +141,35 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 # downloadDriveGeotiffs('meadow_2019', False, "2019")
 # downloadDriveGeotiffs('meadow_2019', True)
+
+
+def mergeToSingleGeotiff(inputdir, outfile, variable, endname, crs="4326", res=30):
+    all_files = [os.path.join(inputdir, f) for f in os.listdir(inputdir) if f.endswith(endname)]
+    all_data = pd.DataFrame(columns=['X', 'Y', variable])
+    
+    if endname.endswith(".tif"):
+        for file in all_files:
+            geotiff = xr.open_rasterio(file)
+            df = geotiff.to_dataframe(name='value').reset_index()
+            df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+            df.columns = ['X', 'Y', variable]
+            geotiff.close()
+            all_data = pd.concat([all_data, df])
+    elif endname.endswith(".csv"):
+        for file in all_files:
+            df = pd.read_csv(file)
+            df = df.loc[:, ['X', 'Y', variable]]
+            all_data = pd.concat([all_data, df])
+    else:
+        return
+    
+    all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
+    utm_lons, utm_lats = all_data['X'], all_data['Y']
+    pixel_values = all_data[variable]
+    
+    gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=crs)
+    out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
+    out_grd.rio.to_raster(outfile)
+
+# mergeToSingleGeotiff("files/2023", "files/2023/merged_ANPP.tif", "ANPP", ".csv")
+# mergeToSingleGeotiff("files/2023", "files/2023/merged_BGB.tif", 1, "_BGB.tif")

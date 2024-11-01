@@ -340,8 +340,8 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=11, n_estimators=100, subsample=0.4, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=11, 
-                                      n_estimators=100, subsample=0.4, validation_fraction=0.2, n_iter_no_change=50,  
+bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=6, 
+                                      n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 
 bgb_model.fit(X_train, y_train)

@@ -527,17 +527,15 @@ noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
 if __name__ == "__main__":
-    start = datetime.now()
-    ee.Initialize()
     years = range(1984, 2025)
     for year in years[-6:-1]:
+        start = datetime.now()
         loadYearCollection(year)
         with multiprocessing.Pool(processes=60) as pool:
             bandresult = pool.map(prepareMeadows, allIdx)
         with open(f'files/{year}/bandresult.pckl', 'wb') as f:
             pickle.dump(bandresult, f)
-        print(f"Pre-processing of tasks for {year} completed!")
-    print(datetime.now() - start)
+        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
     
     G_driveAccess()
     ee.Initialize()
