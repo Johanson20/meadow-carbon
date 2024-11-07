@@ -207,7 +207,7 @@ ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.fe
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-10-16.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-11-5.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None

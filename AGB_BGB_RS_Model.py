@@ -354,6 +354,16 @@ with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
         ax.set_title(f'Partial Dependence of {var_col[i]}')
         pdf.savefig(fig)
         plt.close(fig)
+with PdfPages('files/BGB_1_1_plot.pdf') as pdf:
+    fig, ax = plt.subplots(figsize=(8, 6))
+    y_test_pred = bgb_model.predict(X_test)
+    y_test_84_pred = bgb_84_model.predict(X_test)
+    sns.regplot(y=y_test_pred, x=y_test_84_pred, line_kws={"color":"blue"}, ax=ax, label="84th quantile prediction")
+    sns.regplot(y=y_test_pred, x=y_test_pred, line_kws={"color":"red"}, ax=ax, label=f"Mean prediction: R = {round(np.corrcoef(y_test_84_pred, y_test_pred)[1][0], 5)}")
+    ax.set_title('Scatter plot of 84th_quantile vs mean')
+    ax.legend()
+    pdf.savefig(fig)
+    plt.close(fig)
 len(bgb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
@@ -473,6 +483,16 @@ with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
         ax.set_title(f'Partial Dependence of {var_col[i]}')
         pdf.savefig(fig)
         plt.close(fig)
+with PdfPages('files/AGB_1_1_plot.pdf') as pdf:
+    fig, ax = plt.subplots(figsize=(8, 6))
+    y_test_pred = agb_model.predict(X_test)
+    y_test_84_pred = agb_84_model.predict(X_test)
+    sns.regplot(y=y_test_pred, x=y_test_84_pred, line_kws={"color":"blue"}, ax=ax, label="84th quantile prediction")
+    sns.regplot(y=y_test_pred, x=y_test_pred, line_kws={"color":"red"}, ax=ax, label=f"Mean prediction: R = {round(np.corrcoef(y_test_84_pred, y_test_pred)[1][0], 5)}")
+    ax.set_title('Scatter plot of 84th_quantile vs mean')
+    ax.legend()
+    pdf.savefig(fig)
+    plt.close(fig)
 len(agb_model.estimators_)  # number of trees used in estimation
 
 # print relevant stats
