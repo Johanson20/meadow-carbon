@@ -148,13 +148,13 @@ def interpolate_group(group):
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
     # actively growing vegetation is when NDVI >= 0.2
-    resp = group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_Rh']]
+    resp = group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']]
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
-    group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_Rh']] = resp
-    group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_Rh'])]
+    group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']] = resp
+    group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
     group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
-    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month']), axis=1, inplace=True)
+    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
     
     return group.head(1)
 
@@ -239,7 +239,7 @@ daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).sel
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('17/10/2024', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('20/11/2024', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -249,7 +249,7 @@ def prepareMeadows(meadowIdx):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = feature.ID, feature.crs
+        meadowId, mycrs = int(feature.ID), feature.crs
         if feature.geometry.geom_type == 'Polygon':
             if feature.Area_km2 > 0.5:
                 feature.geometry = feature.geometry.simplify(0.00001)
@@ -483,7 +483,7 @@ def processMeadow(meadowCues):
             all_data.reset_index(drop=True, inplace=True)
             all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
             sd_1 = ghg_84_model.predict(all_data.loc[:, ghg_col])
-            all_data['1SD_Rh'] = sd_1 - all_data['CO2.umol.m2.s']
+            all_data['1SD_CO2'] = abs(sd_1 - all_data['CO2.umol.m2.s'])
             all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
             all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
     
@@ -491,9 +491,9 @@ def processMeadow(meadowCues):
             all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
             all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, bgb_col])
             sd_1 = agb_84_model.predict(all_data.loc[:, agb_col])
-            all_data['1SD_ANPP'] = sd_1 - all_data['HerbBio.g.m2']
+            all_data['1SD_ANPP'] = abs(sd_1 - all_data['HerbBio.g.m2'])
             sd_1 = bgb_84_model.predict(all_data.loc[:, bgb_col])
-            all_data['1SD_BNPP'] = sd_1 - all_data['Roots.kg.m2']
+            all_data['1SD_BNPP'] = abs(sd_1 - all_data['Roots.kg.m2'])
             all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
             all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
             all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
@@ -501,12 +501,13 @@ def processMeadow(meadowCues):
             all_data['1SD_BNPP'] *= 0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
             all_data['1SD_ANPP'] *= 0.433
             all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
+            all_data['1SD_NEP'] = np.std(all_data['NEP'])
             
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
-            out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh']]
-            for i in range(7):
+            out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh'], ['1SD_NEP.tif', '1SD_NEP']]
+            for i in range(8):
                 out_raster = f'files/{year}/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
@@ -527,7 +528,7 @@ noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
 if __name__ == "__main__":
-    years = range(1984, 2025)
+    years = range(1984, 2024)
     for year in years[-6:-1]:
         start = datetime.now()
         loadYearCollection(year)
@@ -539,13 +540,13 @@ if __name__ == "__main__":
     
     G_driveAccess()
     ee.Initialize()
+    tasks = ee.batch.Task.list()
     for year in years[-6:-1]:
         start = datetime.now()
         loadYearCollection(year)
         with open(f'files/{year}/bandresult.pckl', 'rb') as f:
             bandresult = pickle.load(f)
         meadowData = list(zip(allIdx, bandresult))
-        tasks = ee.batch.Task.list()
         tasks = [task for task in tasks if str(year) in task.config['description']]
         with multiprocessing.Pool(processes=60) as pool:
             result = pool.map(processMeadow, meadowData)
