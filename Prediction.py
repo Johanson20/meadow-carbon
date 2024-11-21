@@ -373,7 +373,7 @@ def processMeadow(meadowCues):
         if totalBands <= 14:
             return -1
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = feature.ID, feature.crs
+        meadowId, mycrs = int(feature.ID), feature.crs
             
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
