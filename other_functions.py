@@ -143,12 +143,27 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 # downloadDriveGeotiffs('meadow_2019', True)
 
 
-def mergeToSingleGeotiff(inputdir, outfile, variable, endname, crs="4326", res=30):
+epsg_crs = "EPSG:4326"
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-11-5.shp").to_crs(epsg_crs)
+allIdx = shapefile.copy()
+shapefile = None
+shapefile = allIdx.copy()
+shapefile['crs'] = "EPSG:32611"
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
+shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
+allIdx = None
+
+
+def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, crs="4326", res=30):
     all_files = [os.path.join(inputdir, f) for f in os.listdir(inputdir) if f.endswith(endname)]
     all_data = pd.DataFrame(columns=['X', 'Y', variable])
+    shps_to_use = shapefile[shapefile['crs'] == "EPSG:" + str(zone)].index
     
     if endname.endswith(".tif"):
         for file in all_files:
+            if int(file.split("_")[-2]) not in shps_to_use:
+                continue
             geotiff = xr.open_rasterio(file)
             df = geotiff.to_dataframe(name='value').reset_index()
             df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
@@ -157,6 +172,8 @@ def mergeToSingleGeotiff(inputdir, outfile, variable, endname, crs="4326", res=3
             all_data = pd.concat([all_data, df])
     elif endname.endswith(".csv"):
         for file in all_files:
+            if int(file.split("_")[-2]) not in shps_to_use:
+                continue
             df = pd.read_csv(file)
             df = df.loc[:, ['X', 'Y', variable]]
             all_data = pd.concat([all_data, df])
@@ -171,5 +188,6 @@ def mergeToSingleGeotiff(inputdir, outfile, variable, endname, crs="4326", res=3
     out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
     out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("files/2023", "files/2023/merged_ANPP.tif", "ANPP", ".csv")
-# mergeToSingleGeotiff("files/2023", "files/2023/merged_BGB.tif", 1, "_BGB.tif")
+# mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_merged_10.tif", "_NEP.tif")
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_merged_11.tif", "_NEP.tif", "NEP", 32611)
