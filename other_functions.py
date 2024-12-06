@@ -155,9 +155,9 @@ shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
 allIdx = None
 
 
-def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, crs="4326", res=30):
+def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, res=30):
     all_files = [os.path.join(inputdir, f) for f in os.listdir(inputdir) if f.endswith(endname)]
-    all_data = pd.DataFrame(columns=['X', 'Y', variable])
+    all_data = pd.DataFrame(columns=['Y', 'X', variable])
     shps_to_use = shapefile[shapefile['crs'] == "EPSG:" + str(zone)].index
     
     if endname.endswith(".tif"):
@@ -167,7 +167,7 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
             geotiff = xr.open_rasterio(file)
             df = geotiff.to_dataframe(name='value').reset_index()
             df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
-            df.columns = ['X', 'Y', variable]
+            df.columns = ['Y', 'X', variable]
             geotiff.close()
             all_data = pd.concat([all_data, df])
     elif endname.endswith(".csv"):
@@ -175,7 +175,7 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
             if int(file.split("_")[-2]) not in shps_to_use:
                 continue
             df = pd.read_csv(file)
-            df = df.loc[:, ['X', 'Y', variable]]
+            df = df.loc[:, ['Y', 'X', variable]]
             all_data = pd.concat([all_data, df])
     else:
         return
@@ -184,10 +184,11 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     utm_lons, utm_lats = all_data['X'], all_data['Y']
     pixel_values = all_data[variable]
     
-    gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=crs)
+    gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone)
     out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
+    out_grd = out_grd.rio.reproject(epsg_crs)
     out_grd.rio.to_raster(outfile)
 
 # mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_merged_10.tif", "_NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_merged_11.tif", "_NEP.tif", "NEP", 32611)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "_NEP.tif")
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)
