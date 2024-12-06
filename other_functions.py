@@ -162,6 +162,8 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     
     if endname.endswith(".tif"):
         for file in all_files:
+            if file.endswith("1SD" + endname):
+                continue
             if int(file.split("_")[-2]) not in shps_to_use:
                 continue
             geotiff = xr.open_rasterio(file)

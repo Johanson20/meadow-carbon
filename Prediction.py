@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr 22 11:03:25 2024
+
+@author: jonyegbula
+"""
+
 import os
 import time
 import numpy as np
@@ -17,7 +24,7 @@ from shapely.geometry import box, Polygon
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
-mydir = "R:/SCRATCH/jonyegbula/meadow-carbon"
+mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
@@ -230,11 +237,12 @@ gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).s
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Y', 'X', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+G_driveAccess()
 allIdx = shapefile.index
 current_time = datetime.strptime('20/11/2024', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
-year = 2010
+year = 2021
 loadYearCollection(year)
 
 def prepareMeadows(meadowIdx):
@@ -411,8 +419,49 @@ def processMeadow(meadowCues):
                 bandnames1 = bandnames1.copy() + bandnames1[:11]
                 noBands1 -= 11
         
+        if not 'tasks' in globals():
+            tasks = ee.batch.Task.list()
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
+            # check that the image isn't already downloaded and it isn't a residue image (which won't be in G_drive)
+            if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
+                tasks = [task for task in tasks if task.config['description'] in image_names]
+                isOngoing = True
+                filename = ""
+                while isOngoing:
+                    newtasks = []
+                    for t_k in range(len(tasks)):
+                        task = tasks[t_k]
+                        if task.status()['description'] in image_names and task.status()['creation_timestamp_ms'] > current_time:
+                            newtasks.append(task)
+                            if task.status()['state'] == 'COMPLETED':
+                                filename = task.status()['description']
+                                isOngoing = False
+                                break
+                            elif task.status()['state'] == 'FAILED':
+                                if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
+                                    isOngoing = False
+                                continue
+                            else:
+                                time.sleep(2/len(image_names))
+                    if not newtasks:
+                        isOngoing = False
+                if filename:    # load all files matching the filename from google drive)
+                    try:
+                        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
+                    except:
+                        try:
+                            time.sleep(3)
+                            file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
+                        except:
+                            return -3              
+                    for file in file_list:
+                        if file['title'] == filename + ".tif":
+                            image_name = f"files/bands/{year}/{filename}.tif"
+                            try:
+                                file.GetContentFile(image_name)     # download file from G-drive to local folder
+                            except:
+                                continue
             try:
                 image_names.remove(image_name[17:-4])
                 if image_name.endswith('e.tif'):
@@ -473,14 +522,34 @@ def processMeadow(meadowCues):
     except:
         return -4
 
+'''
+meadowIdx = 16461   # (16422), 16510 (smallest)
+noBands = prepareMeadows(meadowIdx)
+processMeadow((meadowIdx, noBands))
+'''
 if __name__ == "__main__":
-    start = datetime.now()
-    with open(f'files/{year}/bandresult.pckl', 'rb') as f:
-        bandresult = pickle.load(f)
-    meadowData = list(zip(allIdx, bandresult))
-    meadowData.reverse()
-    with multiprocessing.Pool(processes=30) as pool:
-        result = pool.map(processMeadow, meadowData)
-    with open(f'files/{year}/finalresult.pckl', 'wb') as f:
-        pickle.dump(result, f)
-    print(f"Year {year} completed in {datetime.now() - start}")
+    years = range(1984, 2024)
+    for year in years[-6:-1]:
+        start = datetime.now()
+        loadYearCollection(year)
+        with multiprocessing.Pool(processes=60) as pool:
+            bandresult = pool.map(prepareMeadows, allIdx)
+        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+            pickle.dump(bandresult, f)
+        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
+    
+    G_driveAccess()
+    ee.Initialize()
+    tasks = ee.batch.Task.list()
+    for year in years[-6:-1]:
+        start = datetime.now()
+        loadYearCollection(year)
+        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
+            bandresult = pickle.load(f)
+        meadowData = list(zip(allIdx, bandresult))
+        tasks = [task for task in tasks if str(year) in task.config['description']]
+        with multiprocessing.Pool(processes=60) as pool:
+            result = pool.map(processMeadow, meadowData)
+        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
+            pickle.dump(result, f)
+        print(f"Year {year} completed in {datetime.now() - start}")
