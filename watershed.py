@@ -11,7 +11,7 @@ import geopandas as gpd
 import numpy as np
 from affine import Affine
 from pysheds.grid import Grid
-from shapely.geometry import LineString, MultiPolygon
+from shapely.geometry import LineString, MultiPolygon, Polygon
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
@@ -40,12 +40,13 @@ fdir = grid.flowdir(inflated_dem, dirmap=d8)
 
 # Delineate watershed using flow direction
 acc = grid.accumulation(fdir, dirmap=d8)
-
+watershed_polygons, meadowIds, x_pour_points, y_pour_points = [], [], [], []
+upland_areas, average_slopes = [], []
 
 def watershedValues(meadowIdx):
     # extract boundary coordinates of meadow
-    feature = shapefile.loc[meadowIdx, :].geometry
-    meadowId = int(shapefile.loc[meadowIdx, :].ID)
+    meadow = shapefile.loc[meadowIdx, :]
+    feature, meadowId, meadowArea = meadow.geometry, int(meadow.ID), meadow.Area_km2
     if feature.geom_type == 'Polygon':
         meadow_bounds = feature.bounds
         boundary = LineString(list(feature.exterior.coords))
@@ -88,7 +89,6 @@ def watershedValues(meadowIdx):
             min_index = np.argmin(boundary_elevations)
             x_pour_point, y_pour_point = boundary_coords[min_index]
         
-        
         # Convert pour point to grid indices
         lon, lat = x_pour_point, y_pour_point
         row, col = (int((new_affine[5] - lat) / cellsize), int((lon - new_affine[2]) / cellsize))
@@ -98,19 +98,38 @@ def watershedValues(meadowIdx):
         
         # Calculate slope at pour point (units need adjustment based on cell size)
         dz_dx, dz_dy = np.gradient(inflated_dem[min_row:max_row, min_col:max_col], cellsize)
-        slope_at_pour = np.sqrt(dz_dx[row, col]**2 + dz_dy[row, col]**2)
+        avg_slope = np.sqrt(dz_dx[row, col]**2 + dz_dy[row, col]**2)
         
-        return [meadowId, lon, lat, upland_area, slope_at_pour]
+        # Delineate watershed and save other attributes
+        ws_mask = grid.catchment(x_pour_point, y_pour_point, fdir, dirmap=d8, xytype='coordinate')
+        ws_mask = ws_mask.astype('int32')
+        watershed = list(grid.polygonize(ws_mask))
+        for geom, value in watershed:
+            if geom['type'] == 'Polygon' and value == 1:
+                watershed_polygons.append(Polygon(geom['coordinates'][0]))
+                meadowIds.append(meadowId)
+                x_pour_points.append(x_pour_point)
+                y_pour_points.append(y_pour_point)
+                upland_areas.append(upland_area)
+                average_slopes.append(avg_slope)
+        
+        return [meadowId, meadowArea, lon, lat, upland_area, avg_slope]
     except:
-        return [meadowId, np.nan, np.nan, np.nan, np.nan]
+        return [meadowId, meadowArea, np.nan, np.nan, np.nan, np.nan]
 
 
-watersheds = pd.DataFrame(columns=['ID', 'Longitude', 'Latitude', 'Upland_Area', 'Slope_at_Pour'])
+watersheds = pd.DataFrame(columns=['ID', 'Area_km2', 'Longitude', 'Latitude', 'Upland_Area', 'Average_catchment_slope'])
 
 for meadowIdx in shapefile.index:
+    if meadowIdx%1000 == 0:
+        print(meadowIdx, end=' ')
     watersheds.loc[meadowIdx, :] = watershedValues(meadowIdx)
 
+# write values to csv and delineated watersheds to a shapefile
 watersheds.to_csv("csv/watersheds.csv", index=False)
+watersheds_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'meadow_Id': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'uplandArea': upland_areas, 'avg_slope': average_slopes}, geometry = 'geometry', crs=shapefile.crs)
+# Save watersheds to a new shapefile
+watersheds_gdf.to_file("files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
 
 # upland_area * 90**2     # Probable area in square meters
 # slope_at_pour/(90**2)   # Probable slope in degrees
