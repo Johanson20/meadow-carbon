@@ -161,6 +161,7 @@ data['Red'] = Red
 data['NIR'] = NIR
 data['SWIR_1'] = SWIR_1
 data['SWIR_2'] = SWIR_2
+
 data['NDVI'] = NDVI
 data['NDWI'] = NDWI
 data['EVI'] = EVI
@@ -192,17 +193,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("files/Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_newData.csv")
 data.head()
+data['SampleDate'] = pd.to_datetime(data['SampleDate'])
+data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
 # confirm column names first
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
+data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[27:-2]) + ['dNDPI']
+var_col =  list(cols[9:15]) + ['NDWI', 'NIR_Green', 'Maximum_temperature']
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
