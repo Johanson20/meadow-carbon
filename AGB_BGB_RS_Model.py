@@ -3,10 +3,10 @@
 @author: Johanson C. Onyegbula
 """
 
-
 import os
 import ee
 import pickle
+import warnings
 import pandas as pd
 
 mydir = "Code"      # adjust directory
@@ -31,11 +31,13 @@ data.head()
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
 ee.Initialize()
+warnings.filterwarnings("ignore")
 
 
 def calculateIndices(image):
     # rename bands and  normalize raw reflectance values
-    scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(1e-4)
+    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
     
     # add indices
@@ -51,59 +53,103 @@ def calculateIndices(image):
 
 
 def maskCloud(image):
-    image = image.rename(['Blue','Green','Red','RE_1','RE_2','RE_3','NIR','RE_4','SWIR_1','SWIR_2','SCL'])
-    # mask out cloud based on bits in SCL band
-    scl = image.select('SCL')
-    cloud_mask = scl.neq(3).And(scl.lt(8))
+    # mask out cloud based on bits in QA_pixel
+    qa = image.select('QA')
+    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
+    cloud = qa.bitwiseAnd(1 << 3).eq(0)
+    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
 
 
-# Calculates absolute time difference (in days) from a target date, in which the images are acquired
-def calculate_time_difference(image):
-    time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
-    return image.set('time_difference', time_difference)
+# This is used to extract all band values and relevant attributes    
+def extract_band_values(image):
+    values = image.reduceRegion(reducer=ee.Reducer.first(), geometry=point, scale=30)
+    date = image.date().format('YYYY-MM-dd')
+    driver = image.get('SPACECRAFT_ID')
+    utm_zone = image.get('UTM_ZONE')
+    return ee.Feature(None, values).set('Date', date).set('Driver', driver).set('UTM', utm_zone)
 
 
-def getBandValues(img_collection, point, target_date, bufferDays = 15):
-    # filter landsat images by location and dates about a 15-day radius and sort by proximity to sample date
-    spatial_filtered = img_collection.filterBounds(point)
-    temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), ee.Date(target_date).advance(bufferDays, 'day'))
-    # Map the ImageCollection over time difference and sort to get image of closest date
-    sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
-    noImages = sorted_collection.size().getInfo()
+# get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
+def getPeakBandValues(point, year, sortAscending=False):
+    spatial_filtered = landsat[year].filterBounds(point).map(maskCloud)
     
-    if not noImages:
-        return [{"Blue": None}, None]
+    # extract all band values and drop NAs due to cloud masking
+    band_values = spatial_filtered.map(extract_band_values).getInfo()['features']
+    if not band_values:
+        return [{'Blue': None}, {'Blue': None}, 0, 0]
+    values = []
+    for feature in band_values:
+        values.append(feature['properties'])
+    df = pd.DataFrame(values)
+    df['Date'] = pd.to_datetime(df['Date'])
+    # drop duplicate dates (order of preservation is landsat 9, then 8, then 7)
+    df.drop_duplicates(subset='Date', inplace=True)
+    df.dropna(inplace=True)
     
-    image_list = sorted_collection.toList(sorted_collection.size())
-    nImage, band_values = 0, {'Blue': None}
+    # Set the 'date' column as the index, re-index and linearly interpolate bands at daily frequency
+    df_daily = df.set_index('Date')
+    date_range = pd.date_range(start=str(int(year)-1)+"-10-01", end=year+"-10-01", freq='D')[:-1]
+    df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill().drop(['Driver', 'UTM'], axis=1)
     
-    # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
-    while band_values['Blue'] == None and nImage < noImages:
-        nearest_image = ee.Image(image_list.get(nImage))
-        nImage += 1
-        value = nearest_image.getInfo()['properties']
-        band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    
-    return [band_values, value['time_difference']]
+    # sort by EVI to get band values at peak EVI date
+    # compute integrals for growing season (when NDVI >= 0.2, NDWI <= 0.5 and NDSI <= 0.2)
+    df['Date'] = df['Date'].dt.strftime("%Y-%m-%d")
+    df.loc[df['NDSI'] > 0.2, 'EVI'] = 0
+    band_values = df.sort_values('EVI', ascending=False, ignore_index=True).loc[0,:]
+    df_daily.dropna(inplace=True)
+    integrals = df_daily[df_daily.NDSI <= 0.2]
+    # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5)
+    no_snow_days = len(date_range) - integrals.shape[0]
+    no_wet_days = integrals[integrals.NDWI > 0.5].shape[0]
+    integrals = integrals[(integrals.NDWI <= 0.5) & (integrals.NDVI >= 0.2)]
+    integrals = integrals.sum()
+
+    return [band_values, integrals, no_snow_days, no_wet_days]
 
 
 def resample10(image):
-    return image.resample("bilinear").reproject(crs="EPSG:32610", scale=10)
+    return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
 def resample11(image):
-    return image.resample("bilinear").reproject(crs="EPSG:32611", scale=10)
+    return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-sentinel1 = ee.ImageCollection("COPERNICUS/S1_GRD").select(['VH', 'VV'])
-sentinel2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").select(['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12','SCL'])
-sentinel2_10 = sentinel2.map(resample10).map(maskCloud).map(calculateIndices)
-sentinel2_11 = sentinel2.map(resample11).map(maskCloud).map(calculateIndices)
+# reads Landsat data, flow accumulation, daymet, terraclimate and DEM data (for slope and elevation)
+landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
+# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
+dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+slopeDem = ee.Terrain.slope(dem)
+daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample10)
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample10)
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample10)
 
-target_date = ''
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
+dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+slopeDem_11 = ee.Terrain.slope(dem_11)
+daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample11)
+gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
+
+# merge landsat, then extract unique years and create a dictionary of landsat data for each year
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(calculateIndices)
+years = set([x[:4] for x in data['SampleDate']])
+landsat = {}
+for year in years:
+    landsat[year] = landsat_collection.filterDate(str(int(year)-1)+"-10-01", year+"-10-01")
+
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 NDVI, NDWI, EVI, SAVI, BSI, NDSI, NDPI = [], [], [], [], [], [], []
-RE_1, RE_2, RE_3, RE_4, VV, VH, CRS, time_diff = [], [], [], [], [], [], [], []
+flow, slope, elevation, wet, snowy = [], [], [], [], []
+mean_annual_pr, swe, et, cdef, peak_dates, driver  = [], [], [], [], [], []
+dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
+dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDSI, dNDPI = [], [], [], [], [], [], []
+min_temp, max_temp = [], []
 
 # populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
@@ -111,23 +157,52 @@ for idx in range(data.shape[0]):
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
-    
-    if x <= -120:   # zone 11 longitudes are (126W, 120W)
-        mycrs = "EPSG:32611"
-        band_values, t_diff = getBandValues(sentinel2_11, point, target_date)
-    else:
-        mycrs = "EPSG:32610"
-        band_values, t_diff = getBandValues(sentinel2_10, point, target_date)
-    if not band_values['Blue']:
+    year, month, day = target_date.split("-")
+    next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
+    if int(year) > 2023:    # 2024 data still seems unavailable
         data.drop(idx, inplace=True)
         print("Row", idx, "dropped!")
         continue
     
-    sent = sentinel1.filterBounds(point).filterDate(ee.Date(target_date).advance(-3, 'day'), ee.Date(target_date).advance(3, 'day'))
-    try:
-        sent_values = sent.first().reduceRegion(ee.Reducer.mean(), point, 10).getInfo()
-    except:
-        sent_values = {"VH": None, "VV": None}
+    band_values, integrals, snow_days, wet_days = getPeakBandValues(point, year)
+    
+    if not band_values['Blue']:     # drop rows that returned no value
+        data.drop(idx, inplace=True)
+        print("Row", idx, "dropped!")
+        continue
+    
+    if not integrals['Blue']:
+        for band in integrals.index:
+            integrals[band] = 0
+    
+    # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
+    mycrs = 'EPSG:326' + str(band_values['UTM'])
+    if mycrs == "EPSG:32611":
+        tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        daymetv4 = daymet_11.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+        max_tvalues = gridmet_11.filterBounds(point).filterDate(year+"-"+month+"-01", year+"-"+next_month+"-01").max()
+        min_tvalues = gridmet_11.filterBounds(point).filterDate(year+"-"+month+"-01", year+"-"+next_month+"-01").min()
+        elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    else:
+        tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+        max_tvalues = gridmet.filterBounds(point).filterDate(year+"-"+month+"-01", year+"-"+next_month+"-01").max()
+        min_tvalues = gridmet.filterBounds(point).filterDate(year+"-"+month+"-01", year+"-"+next_month+"-01").min()
+        elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        
+    swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    mean_pr = tclimate['pr']
+    cdef_value = tclimate['def']
+    aet = tclimate['aet']
+    temps = min_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    tmin = temps['tmmn']
+    temps = max_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    tmax = temps['tmmx']
     
     Blue.append(band_values['Blue'])
     Green.append(band_values['Green'])
@@ -143,17 +218,38 @@ for idx in range(data.shape[0]):
     NDSI.append(band_values['NDSI'])
     NDPI.append(band_values['NDPI'])
     
-    RE_1.append(band_values['RE_1'])
-    RE_2.append(band_values['RE_2'])
-    RE_3.append(band_values['RE_3'])
-    RE_4.append(band_values['RE_4'])
-    VV.append(sent_values['VV'])
-    VH.append(sent_values['VH'])
-    time_diff.append(t_diff)
-    CRS.append(mycrs)
+    dBlue.append(integrals['Blue'])
+    dGreen.append(integrals['Green'])
+    dRed.append(integrals['Red'])
+    dNIR.append(integrals['NIR'])
+    dSWIR_1.append(integrals['SWIR_1'])
+    dSWIR_2.append(integrals['SWIR_2'])
+    dNDVI.append(integrals['NDVI'])
+    dNDWI.append(integrals['NDWI'])
+    dEVI.append(integrals['EVI'])
+    dSAVI.append(integrals['SAVI'])
+    dBSI.append(integrals['BSI'])
+    dNDSI.append(integrals['NDSI'])
+    dNDPI.append(integrals['NDPI'])
+    
+    wet.append(wet_days)
+    snowy.append(snow_days)
+    mean_annual_pr.append(mean_pr)
+    flow.append(flow_value)
+    elevation.append(elev)
+    slope.append(slope_value)
+    swe.append(swe_value)
+    et.append(aet)
+    cdef.append(cdef_value)
+    peak_dates.append(band_values['Date'])
+    driver.append(band_values['Driver'])
+    min_temp.append(tmin)
+    max_temp.append(tmax)
     
     if idx%50 == 0: print(idx, end=' ')
 
+# checks if they are all cloud free (should equal data.shape[0])
+len([x for x in NIR if x])
 
 data['Blue'] = Blue
 data['Green'] = Green
@@ -161,7 +257,23 @@ data['Red'] = Red
 data['NIR'] = NIR
 data['SWIR_1'] = SWIR_1
 data['SWIR_2'] = SWIR_2
+data['peak_date'] = peak_dates
+data['Driver'] = driver
 
+data['Cdef'] = cdef
+data['Elevation'] = elevation
+data['AET'] = et
+data['Flow'] = flow
+data['Slope'] = slope
+data['SWE'] = swe
+data['Annual_Precipitation'] = mean_annual_pr
+data['Snow_days'] = snowy
+data['Wet_days'] = wet
+data['Minimum_temperature'] = min_temp
+data['Maximum_temperature'] = max_temp
+
+data['NIR_Green'] = data['NIR']/data['Green']
+data['NIR_Red'] = data['NIR']/data['Red']
 data['NDVI'] = NDVI
 data['NDWI'] = NDWI
 data['EVI'] = EVI
@@ -170,16 +282,26 @@ data['BSI'] = BSI
 data['NDSI'] = NDSI
 data['NDPI'] = NDPI
 
-data['RE_1'] = RE_1
-data['RE_2'] = RE_2
-data['RE_3'] = RE_3
-data['RE_4'] = RE_4
-data['VH'] = VH
-data['VV'] = VV
-data['CRS_Zone'] = CRS
-data['Days_of_data_acquisition_offset'] = time_diff
+data['dBlue'] = dBlue
+data['dGreen'] = dGreen
+data['dRed'] = dRed
+data['dNIR'] = dNIR
+data['dSWIR_1'] = dSWIR_1
+data['dSWIR_2'] = dSWIR_2
+data['dNDVI'] = dNDVI
+data['dNDWI'] = dNDWI
+data['dEVI'] = dEVI
+data['dSAVI'] = dSAVI
+data['dBSI'] = dBSI
+data['dNDSI'] = dNDSI
+data['dNDPI'] = dNDPI
 
-data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)  
+data.reset_index(drop=True, inplace=True)
+data.head()
+
+# write updated dataframe to new csv file
+data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
+
 
 # ML training starts here
 from sklearn.model_selection import GroupShuffleSplit
@@ -193,7 +315,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/Belowground Biomass_RS Model_newData.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 data['SampleDate'] = pd.to_datetime(data['SampleDate'])
 data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
@@ -206,7 +328,7 @@ data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:15]) + ['NDWI', 'NIR_Green', 'Maximum_temperature']
+var_col =  list(cols[20:26]) + list(cols[-13:])
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -243,7 +365,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=14, n_estimators=25, subsample=0.8, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=11, n_estimators=75, subsample=0.9, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=6, 
                                       n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
@@ -339,7 +461,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[25:-2]) + ['dNDPI']
+var_col =  list(cols[18:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -373,7 +495,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=6, n_estimators=50, subsample=0.7, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=5, n_estimators=25, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.07, alpha=0.8413, max_depth=6, 
                                       n_estimators=50, subsample=0.7, validation_fraction=0.2, n_iter_no_change=50,  
