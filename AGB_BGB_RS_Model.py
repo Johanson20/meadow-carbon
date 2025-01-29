@@ -317,8 +317,8 @@ import numpy as np
 # read csv containing random samples
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
-data['SampleDate'] = pd.to_datetime(data['SampleDate'])
-data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
+# data['SampleDate'] = pd.to_datetime(data['SampleDate'])
+# data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
 # confirm column names first
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -328,7 +328,7 @@ data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[20:26]) + list(cols[-13:])
+var_col =  list(cols[20:26]) + list(cols[-29:])
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -365,7 +365,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=11, n_estimators=75, subsample=0.9, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=6, 
                                       n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
