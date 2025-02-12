@@ -329,6 +329,7 @@ data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
 var_col =  list(cols[20:26]) + list(cols[-29:])
+# var_col =  list(cols[20:26]) + list(cols[-18:])
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -367,6 +368,8 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+'''bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
+                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
 bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.16, alpha=0.8413, max_depth=6, 
                                       n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)

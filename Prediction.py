@@ -64,7 +64,7 @@ def geotiffToCsv(input_raster, bandnames):
     # There are 11 repeating bands
     for col in range(1, 12):
         values = []
-        for band in [col] + list(range(14+col, nBands+1, 11)):
+        for band in [col] + list(range(19+col, nBands+1, 11)):
             if band in allBands:
                 values = values + list(df[band])
             else:
@@ -73,7 +73,7 @@ def geotiffToCsv(input_raster, bandnames):
     
     # repeat the other columns throughout length of dataframe
     n = int(out_csv.shape[0]/nrows)
-    for col in range(12, 15):
+    for col in range(12, 20):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -145,17 +145,16 @@ def interpolate_group(group):
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = integrals[integrals.NDWI > 0.5].shape[0]
     integrals = integrals[(integrals.NDWI <= 0.5) & (integrals.NDVI >= 0.2)]
-    integrals = integrals[cols[:6] + cols[-7:-1]].sum()
+    integrals = integrals[cols[:6] + cols[-7:]].sum()
     for integral in integrals.keys():
         group['d'+integral] = integrals[integral]
     # actively growing vegetation is when NDVI >= 0.2
-    resp = group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']]
+    resp = group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s']
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
-    group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']] = resp
-    group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
-    group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
+    group.loc[group['NDVI'] >= 0.2, 'CO2.umol.m2.s'] = resp
+    group.loc[:, 'Rh'] = sum(group['CO2.umol.m2.s'])*12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
-    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
+    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month', 'CO2.umol.m2.s']), axis=1, inplace=True)
     
     return group.head(1)
 
@@ -234,13 +233,31 @@ landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2'
 landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
+perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
+hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
+organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
+perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
+hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
+organic_m_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample11)
+
+shallow_perc_clay_11 = ee.ImageCollection(perc_clay_11.toList(3)).mean()
+deep_perc_clay_11 = ee.Image(perc_clay_11.toList(6).get(3))
+shallow_hydra_cond_11 = ee.ImageCollection(hydra_cond_11.toList(3)).mean()
+deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
+shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
+shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
+deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
+shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
+deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
+shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
+
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Y', 'X', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('20/11/2024', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('20/01/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -280,13 +297,23 @@ def prepareMeadows(meadowIdx):
             flow_30m = flow_acc_11.clip(shapefile_bbox).toFloat()
             slope_30m = slope_11.clip(shapefile_bbox).toFloat()
             swe_30m = daymet_11.clip(shapefile_bbox).toFloat()
+            shall_clay = shallow_perc_clay_11.clip(shapefile_bbox).toFloat()
+            deep_clay = deep_perc_clay_11.clip(shapefile_bbox).toFloat()
+            shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox).toFloat()
+            deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox).toFloat()
+            shall_org = shallow_organic_m_11.clip(shapefile_bbox).toFloat()
         else:
             flow_30m = flow_acc_10.clip(shapefile_bbox).toFloat()
             slope_30m = slope_10.clip(shapefile_bbox).toFloat()
             swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
+            shall_clay = shallow_perc_clay.clip(shapefile_bbox).toFloat()
+            deep_clay = deep_perc_clay.clip(shapefile_bbox).toFloat()
+            shall_hydra = shallow_hydra_cond.clip(shapefile_bbox).toFloat()
+            deep_hydra = deep_hydra_cond.clip(shapefile_bbox).toFloat()
+            shall_org = shallow_organic_m.clip(shapefile_bbox).toFloat()
         
         combined_image, residue_image = None, None
-        noBands, bandnames1 = 14, 0
+        noBands, bandnames1 = 19, 0
         subregions = [shapefile_bbox]
         
         # iterate through each landsat image and align data types (float32)
@@ -308,10 +335,10 @@ def prepareMeadows(meadowIdx):
             
             # align other satellite data with landsat and make resolution (30m)
             if idx == 0:     # extract constant values once for the same meadow
-                combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
+                combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
                 if noImages > 92:   # split image when bands would exceed 1024
-                    bandnames1 = 14
-                    residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
+                    bandnames1 = 19
+                    residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
             else:
                 if noBands < 1013:
                     noBands += 11     # 11 total of recurring bands
@@ -346,7 +373,7 @@ def prepareMeadows(meadowIdx):
                         time.sleep(1.5)
                         with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                    if bandnames1 > 14 and os.path.exists(image_name):
+                    if bandnames1 > 19 and os.path.exists(image_name):
                         extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                         geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
                         if not os.path.exists(extra_image_name):
@@ -354,7 +381,7 @@ def prepareMeadows(meadowIdx):
                             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                                 geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
             if not os.path.exists(image_name):    # merge both images for g-drive download
-                if bandnames1 > 14 and residue_image is not None:
+                if bandnames1 > 19 and residue_image is not None:
                     total_image = combined_image.addBands(residue_image)
                 else:
                     total_image = combined_image
@@ -368,10 +395,14 @@ def prepareMeadows(meadowIdx):
         return -4
 
 
+noBands = prepareMeadows(16461)
+processMeadow((meadowIdx, noBands))
+
+
 def processMeadow(meadowCues):
     try:
         meadowIdx, totalBands = meadowCues
-        if totalBands <= 14:
+        if totalBands <= 19:
             return -1
         feature = shapefile.loc[meadowIdx, :]
         meadowId, mycrs = int(feature.ID), feature.crs
@@ -379,10 +410,10 @@ def processMeadow(meadowCues):
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
         df = pd.DataFrame()
-        noBands = 1015 if totalBands > 1024 else totalBands
+        noBands = 1020 if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
-        bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
+        bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe', 'shall_clay', 'deep_clay', 'shall_hydra', 'deep_hydra', 'shall_org']
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = 1
             
@@ -409,14 +440,14 @@ def processMeadow(meadowCues):
                 image_names.add(extra_image_name[17:-4])
         
         if totalBands < 1024:
-            while totalBands > 14:
+            while totalBands > 19:
                 bandnames = bandnames.copy() + bandnames[:11]
                 totalBands -= 11
         else:
-            while noBands > 14:
+            while noBands > 19:
                 bandnames = bandnames.copy() + bandnames[:11]
                 noBands -= 11
-            while noBands1 > 14:
+            while noBands1 > 19:
                 bandnames1 = bandnames1.copy() + bandnames1[:11]
                 noBands1 -= 11
         
@@ -483,36 +514,28 @@ def processMeadow(meadowCues):
             all_data.drop_duplicates(inplace=True)
             all_data.reset_index(drop=True, inplace=True)
             all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
-            sd_1 = ghg_84_model.predict(all_data.loc[:, ghg_col])
-            all_data['1SD_CO2'] = abs(sd_1 - all_data['CO2.umol.m2.s'])
             all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
             all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
     
             # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
             all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
             all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, bgb_col])
-            sd_1 = agb_84_model.predict(all_data.loc[:, agb_col])
-            all_data['1SD_ANPP'] = abs(sd_1 - all_data['HerbBio.g.m2'])
-            sd_1 = bgb_84_model.predict(all_data.loc[:, bgb_col])
-            all_data['1SD_BNPP'] = abs(sd_1 - all_data['Roots.kg.m2'])
             all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
             all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
             all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
             all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
-            all_data['1SD_BNPP'] *= 0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
-            all_data['1SD_ANPP'] *= 0.433
             all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
-            all_data['1SD_NEP'] = np.std(all_data['NEP'])
             
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
-            out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh'], ['1SD_NEP.tif', '1SD_NEP']]
-            for i in range(8):
+            out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP']]
+            for i in range(4):
                 out_raster = f'files/{year}/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
+                gdf.plot(column=response_col, cmap='viridis', legend=True)
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
