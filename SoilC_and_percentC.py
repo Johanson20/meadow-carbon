@@ -45,13 +45,12 @@ def calculateIndices(image):
     # add indices
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
     ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
-    ndsi = image.normalizedDifference(['Green', 'SWIR_1']).rename('NDSI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
     
-    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi])
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndpi])
 
 
 def maskCloud(image):
@@ -85,12 +84,12 @@ landsat_Sept = landsat_collection.filterDate("1999-09-01", "2024-09-30").filter(
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'pr']).map(resample10)
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['tmmn', 'tmmx', 'pr']).map(resample10)
 
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
-gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'pr']).map(resample11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['tmmn', 'tmmx', 'pr']).map(resample11)
 
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
@@ -117,10 +116,10 @@ shallow_perc_sand_11 = ee.ImageCollection(perc_sand_11.toList(3)).mean()
 deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 
 Blue_Summer, Green_Summer, Red_Summer, NIR_Summer, SWIR_1_Summer, SWIR_2_Summer = [], [], [], [], [], []
-NDVI_Summer, NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDSI_Summer, NDPI_Summer = [], [], [], [], [], [], []
+NDVI_Summer, NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer = [], [], [], [], [], []
 Blue_Fall, Green_Fall, Red_Fall, NIR_Fall, SWIR_1_Fall, SWIR_2_Fall = [], [], [], [], [], []
-NDVI_Fall, NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDSI_Fall, NDPI_Fall = [], [], [], [], [], [], []
-flow, slope, elevation, MAP, MAT = [], [], [], [], []
+NDVI_Fall, NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall = [], [], [], [], [], []
+Flow, Slope, Elevation, MAP, MAT = [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
 # populate bands by applying above functions for each pixel in dataframe
@@ -143,7 +142,8 @@ for idx in range(data.shape[0]):
     
     # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
     if x >= -120:   # EPSG:32611"
-        gridmet_values = gridmet_11.filterBounds(point).filterDate(prev_30_year, year+"-12-31").mean()
+        pr_values = terraclimate_11.filterBounds(point).filterDate(prev_30_year, year+"-12-31").sum()
+        temp_values = terraclimate_11.filterBounds(point).filterDate(prev_30_year, year+"-12-31").mean()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -155,7 +155,8 @@ for idx in range(data.shape[0]):
         deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
-        gridmet_values = gridmet.filterBounds(point).filterDate(prev_30_year, year+"-12-31").mean()
+        pr_values = terraclimate.filterBounds(point).filterDate(prev_30_year, year+"-12-31").sum()
+        temp_values = terraclimate.filterBounds(point).filterDate(prev_30_year, year+"-12-31").mean()
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -167,9 +168,10 @@ for idx in range(data.shape[0]):
         deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         
-    grid_values = gridmet_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
-    mean_pr = grid_values['pr']
-    mean_temp = np.mean(list(grid_values.values())[1:])
+    sum_pr_values = pr_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+    sum_temp_values = temp_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+    mean_pr = sum_pr_values['pr']/30
+    mean_temp = np.mean(list(sum_temp_values.values())[1:])*0.1
     
     Blue_Summer.append(bands_June['Blue'])
     Green_Summer.append(bands_June['Green'])
@@ -182,7 +184,6 @@ for idx in range(data.shape[0]):
     EVI_Summer.append(bands_June['EVI'])
     SAVI_Summer.append(bands_June['SAVI'])
     BSI_Summer.append(bands_June['BSI'])
-    NDSI_Summer.append(bands_June['NDSI'])
     NDPI_Summer.append(bands_June['NDPI'])
     
     Blue_Fall.append(bands_Sept['Blue'])
@@ -196,14 +197,13 @@ for idx in range(data.shape[0]):
     EVI_Fall.append(bands_Sept['EVI'])
     SAVI_Fall.append(bands_Sept['SAVI'])
     BSI_Fall.append(bands_Sept['BSI'])
-    NDSI_Fall.append(bands_Sept['NDSI'])
     NDPI_Fall.append(bands_Sept['NDPI'])
     
     MAP.append(mean_pr)
     MAT.append(mean_temp)
-    flow.append(flow_value)
-    elevation.append(elev)
-    slope.append(slope_value)
+    Flow.append(flow_value)
+    Elevation.append(elev)
+    Slope.append(slope_value)
     Shallow_Clay.append(shallow_clay)
     Shallow_Sand.append(shallow_sand)
     Shallow_Hydra.append(shallow_hydra)
@@ -230,25 +230,23 @@ data['NIR_Sept'] = NIR_Fall
 data['SWIR_1_Sept'] = SWIR_1_Fall
 data['SWIR_2_Sept'] = SWIR_2_Fall
 
-data['Elevation'] = elevation
-data['Flow'] = flow
-data['Slope'] = slope
-data['MAP_30year'] = mean_pr
-data['MAT_30_year'] = mean_temp
+data['Elevation'] = Elevation
+data['Flow'] = Flow
+data['Slope'] = Slope
+data['MAP_30year'] = MAP
+data['MAT_30_year'] = MAT
 
 data['NDVI_June'] = NDVI_Summer
 data['NDWI_June'] = NDWI_Summer
 data['EVI_June'] = EVI_Summer
 data['SAVI_June'] = SAVI_Summer
 data['BSI_June'] = BSI_Summer
-data['NDSI_June'] = NDSI_Summer
 data['NDPI_June'] = NDPI_Summer
 data['NDVI_Sept'] = NDVI_Fall
 data['NDWI_Sept'] = NDWI_Fall
 data['EVI_Sept'] = EVI_Fall
 data['SAVI_Sept'] = SAVI_Fall
 data['BSI_Sept'] = BSI_Fall
-data['NDSI_Sept'] = NDSI_Fall
 data['NDPI_Sept'] = NDPI_Fall
 
 data['Shallow_Clay'] = Shallow_Clay
@@ -276,7 +274,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# read csv containing random samples
+# read csv containing random samples and model soil carbon
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Carbon_Data.csv")
 data.head()
 cols = data.columns
@@ -286,7 +284,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[10:])
+var_col =  list(cols[9:])
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -319,9 +317,8 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
-                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-
+bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=8, n_estimators=25, subsample=0.3,
+                validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
@@ -331,8 +328,8 @@ with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
         ax.set_title(f'Partial Dependence of {var_col[i]}')
         pdf.savefig(fig)
         plt.close(fig)
-len(bgb_soilc_model.estimators_)  # number of trees used in estimation
 
+len(bgb_soilc_model.estimators_)  # number of trees used in estimation
 # print relevant stats
 y_train_pred = bgb_soilc_model.predict(X_train)
 y_test_pred = bgb_soilc_model.predict(X_test)
@@ -390,6 +387,105 @@ plotFeatureImportance()
 plotY()
 
 
-f = open('csv/soilc_models.pckl', 'wb')
-pickle.dump([ghg_model, agb_model, bgb_soilc_model], f)
+# read csv containing random samples and model percent carbon
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Carbon_Data.csv")
+data.head()
+cols = data.columns
+# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
+data = data.loc[:, cols]
+data.drop_duplicates(inplace=True)
+data.reset_index(drop=True, inplace=True)
+
+# remove irrelevant columns for ML and determine X and Y variables
+var_col =  list(cols[9:])
+y_field = 'percentC'
+# subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
+subdata = data.loc[:, ([y_field] + var_col)]
+# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+sum(subdata.isnull().any(axis=0) == True)
+sum(subdata[y_field].isnull())
+
+# if NAs where found (results above are not 0) in one of them (e.g. Y)
+nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
+data.drop(nullIds, inplace = True)
+data.dropna(subset=[y_field], inplace=True)
+data.dropna(subset=var_col, inplace=True)
+data.reset_index(drop=True, inplace=True)
+# make scatter plots of relevant variables from raw dataframe
+with PdfPages('files/PercentC_Scatter_plots.pdf') as pdf:
+    for feature in var_col:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+        pdf.savefig(fig)
+        plt.close(fig)
+
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
+split = gsp.split(data, groups=data['ID'])
+train_index, test_index = next(split)
+train_data = data.iloc[train_index]
+test_data = data.iloc[test_index]
+
+X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
+X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
+
+bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=14, n_estimators=25, subsample=0.6,
+                validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+bgb_percentc_model.fit(X_train, y_train)
+# Make partial dependence plots
+with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
+    for i in range(len(var_col)):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        PartialDependenceDisplay.from_estimator(bgb_percentc_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
+        ax.set_title(f'Partial Dependence of {var_col[i]}')
+        pdf.savefig(fig)
+        plt.close(fig)
+
+len(bgb_percentc_model.estimators_)  # number of trees used in estimation
+# print relevant stats
+y_train_pred = bgb_percentc_model.predict(X_train)
+y_test_pred = bgb_percentc_model.predict(X_test)
+
+train_mae = mean_absolute_error(y_train, y_train_pred)
+train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+val = (y_train_pred - y_train) / y_train
+train_p_bias = np.mean(val[np.isfinite(val)]) * 100
+train_corr = np.corrcoef(y_train, y_train_pred)
+
+test_mae = mean_absolute_error(y_test, y_test_pred)
+test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_corr = np.corrcoef(y_test, y_test_pred)
+val = (y_test_pred - y_test) / y_test
+test_p_bias = sum(val[np.isfinite(val)]) * 100
+
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
+
+# plot Feature importance
+feat_imp = bgb_percentc_model.feature_importances_
+sorted_idx = np.argsort(feat_imp)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
+# Make regression line over y_test and it's predictions
+regressor = LinearRegression()
+y_test = np.array(y_test).reshape(-1,1)
+y_test_pred = np.array(y_test_pred).reshape(-1,1)
+regressor.fit(y_test, y_test_pred)
+y_pred = regressor.predict(y_test)
+
+def plotFeatureImportance():
+    plt.barh(pos, feat_imp[sorted_idx], align="center")
+    plt.yticks(pos, np.array(bgb_percentc_model.feature_names_in_)[sorted_idx])
+    plt.title("Feature Importance")
+
+plotFeatureImportance()
+plotY()
+
+f = open('csv/bgb_carbon_models.pckl', 'wb')
+pickle.dump([bgb_percentc_model, bgb_soilc_model], f)
 f.close()
