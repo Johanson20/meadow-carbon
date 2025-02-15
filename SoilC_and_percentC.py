@@ -284,7 +284,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:])
+var_col =  list(cols[9:21]) + list(cols[22:])
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -317,7 +317,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=8, n_estimators=25, subsample=0.3,
+bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=11, n_estimators=50, subsample=0.3,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -397,7 +397,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:])
+var_col =  list(cols[9:21]) + list(cols[22:])
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -430,7 +430,7 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=14, n_estimators=25, subsample=0.6,
+bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=10, n_estimators=75, subsample=0.4,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
