@@ -17,8 +17,6 @@ os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
 filename = "csv/Belowground Biomass_RS Model.csv"
-# REPEAT same for AGB
-# filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
 data.head()
 data.drop_duplicates(inplace=True)  # remove duplicate rows
@@ -80,7 +78,7 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 landsat_June = landsat_collection.filterDate("1999-06-01", "2024-06-30").filter(ee.Filter.calendarRange(6, 6, 'month'))
 landsat_Sept = landsat_collection.filterDate("1999-09-01", "2024-09-30").filter(ee.Filter.calendarRange(9, 9, 'month'))
 
-# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+# flow accumulation (463.83m resolution); terraclimate (4638.3m resolution); slope and elevation (10.2m resolution); 
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
@@ -91,6 +89,7 @@ dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reduc
 slopeDem_11 = ee.Terrain.slope(dem_11)
 terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['tmmn', 'tmmx', 'pr']).map(resample11)
 
+# these polaris soil datasets have 30m spatial resolution (same as landsat above)
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 perc_sand = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample10)
@@ -135,13 +134,15 @@ for idx in range(data.shape[0]):
         print("Row", idx, "dropped!")
         continue
     
+    # compute 5 year average of landsat bands/indices in June and September
     June_landsat = calculateIndices(landsat_June.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean())
     Sept_landsat = calculateIndices(landsat_Sept.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean())
     bands_June = June_landsat.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
     bands_Sept = Sept_landsat.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
     
     # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
-    if x >= -120:   # EPSG:32611"
+    if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
+        # MAT and MAP values are over 30 years
         pr_values = terraclimate_11.filterBounds(point).filterDate(prev_30_year, year+"-12-31").sum()
         temp_values = terraclimate_11.filterBounds(point).filterDate(prev_30_year, year+"-12-31").mean()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
