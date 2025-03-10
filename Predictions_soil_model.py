@@ -64,7 +64,7 @@ def geotiffToCsv(input_raster, bandnames):
     # There are 11 repeating bands
     for col in range(1, 12):
         values = []
-        for band in [col] + list(range(14+col, nBands+1, 11)):
+        for band in [col] + list(range(19+col, nBands+1, 11)):
             if band in allBands:
                 values = values + list(df[band])
             else:
@@ -73,7 +73,7 @@ def geotiffToCsv(input_raster, bandnames):
     
     # repeat the other columns throughout length of dataframe
     n = int(out_csv.shape[0]/nrows)
-    for col in range(12, 15):
+    for col in range(12, 20):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -205,7 +205,6 @@ f = open('csv/sd_models.pckl', 'rb')
 ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
 f.close()
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
-ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(agb_84_model.feature_names_in_), list(bgb_84_model.feature_names_in_)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
@@ -235,13 +234,31 @@ landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2'
 landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
+perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
+hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
+organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
+perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
+hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
+organic_m_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample11)
+
+shallow_perc_clay_11 = ee.ImageCollection(perc_clay_11.toList(3)).mean()
+deep_perc_clay_11 = ee.Image(perc_clay_11.toList(6).get(3))
+shallow_hydra_cond_11 = ee.ImageCollection(hydra_cond_11.toList(3)).mean()
+deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
+shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
+shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
+deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
+shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
+deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
+shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
+
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Y', 'X', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('24/02/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('20/01/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -281,13 +298,23 @@ def prepareMeadows(meadowIdx):
             flow_30m = flow_acc_11.clip(shapefile_bbox).toFloat()
             slope_30m = slope_11.clip(shapefile_bbox).toFloat()
             swe_30m = daymet_11.clip(shapefile_bbox).toFloat()
+            shall_clay = shallow_perc_clay_11.clip(shapefile_bbox).toFloat()
+            deep_clay = deep_perc_clay_11.clip(shapefile_bbox).toFloat()
+            shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox).toFloat()
+            deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox).toFloat()
+            shall_org = shallow_organic_m_11.clip(shapefile_bbox).toFloat()
         else:
             flow_30m = flow_acc_10.clip(shapefile_bbox).toFloat()
             slope_30m = slope_10.clip(shapefile_bbox).toFloat()
             swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
+            shall_clay = shallow_perc_clay.clip(shapefile_bbox).toFloat()
+            deep_clay = deep_perc_clay.clip(shapefile_bbox).toFloat()
+            shall_hydra = shallow_hydra_cond.clip(shapefile_bbox).toFloat()
+            deep_hydra = deep_hydra_cond.clip(shapefile_bbox).toFloat()
+            shall_org = shallow_organic_m.clip(shapefile_bbox).toFloat()
         
         combined_image, residue_image = None, None
-        noBands, bandnames1 = 14, 0
+        noBands, bandnames1 = 19, 0
         subregions = [shapefile_bbox]
         
         # iterate through each landsat image and align data types (float32)
@@ -309,10 +336,10 @@ def prepareMeadows(meadowIdx):
             
             # align other satellite data with landsat and make resolution (30m)
             if idx == 0:     # extract constant values once for the same meadow
-                combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
+                combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
                 if noImages > 92:   # split image when bands would exceed 1024
-                    bandnames1 = 14
-                    residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m])
+                    bandnames1 = 19
+                    residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
             else:
                 if noBands < 1013:
                     noBands += 11     # 11 total of recurring bands
@@ -347,7 +374,7 @@ def prepareMeadows(meadowIdx):
                         time.sleep(1.5)
                         with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                    if bandnames1 > 14 and os.path.exists(image_name):
+                    if bandnames1 > 19 and os.path.exists(image_name):
                         extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                         geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
                         if not os.path.exists(extra_image_name):
@@ -355,7 +382,7 @@ def prepareMeadows(meadowIdx):
                             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                                 geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
             if not os.path.exists(image_name):    # merge both images for g-drive download
-                if bandnames1 > 14 and residue_image is not None:
+                if bandnames1 > 19 and residue_image is not None:
                     total_image = combined_image.addBands(residue_image)
                 else:
                     total_image = combined_image
@@ -368,11 +395,18 @@ def prepareMeadows(meadowIdx):
     except:
         return -4
 
+year = 2019
+loadYearCollection(year)
+meadowIdx = 13742
+noBands = prepareMeadows(meadowIdx)
+noBands
+processMeadow((meadowIdx, noBands))
+
 
 def processMeadow(meadowCues):
     try:
         meadowIdx, totalBands = meadowCues
-        if totalBands <= 14:
+        if totalBands <= 19:
             return -1
         feature = shapefile.loc[meadowIdx, :]
         meadowId, mycrs = int(feature.ID), feature.crs
@@ -380,10 +414,10 @@ def processMeadow(meadowCues):
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
         df = pd.DataFrame()
-        noBands = 1015 if totalBands > 1024 else totalBands
+        noBands = 1020 if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
-        bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe']
+        bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe', 'shall_clay', 'deep_clay', 'shall_hydra', 'deep_hydra', 'shall_org']
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = 1
             
@@ -410,14 +444,14 @@ def processMeadow(meadowCues):
                 image_names.add(extra_image_name[17:-4])
         
         if totalBands < 1024:
-            while totalBands > 14:
+            while totalBands > 19:
                 bandnames = bandnames.copy() + bandnames[:11]
                 totalBands -= 11
         else:
-            while noBands > 14:
+            while noBands > 19:
                 bandnames = bandnames.copy() + bandnames[:11]
                 noBands -= 11
-            while noBands1 > 14:
+            while noBands1 > 19:
                 bandnames1 = bandnames1.copy() + bandnames1[:11]
                 noBands1 -= 11
         
@@ -426,44 +460,6 @@ def processMeadow(meadowCues):
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
             # check that the image isn't already downloaded and it isn't a residue image (which won't be in G_drive)
-            if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
-                tasks = [task for task in tasks if task.config['description'] in image_names]
-                isOngoing = True
-                filename = ""
-                while isOngoing:
-                    newtasks = []
-                    for t_k in range(len(tasks)):
-                        task = tasks[t_k]
-                        if task.status()['description'] in image_names and task.status()['creation_timestamp_ms'] > current_time:
-                            newtasks.append(task)
-                            if task.status()['state'] == 'COMPLETED':
-                                filename = task.status()['description']
-                                isOngoing = False
-                                break
-                            elif task.status()['state'] == 'FAILED':
-                                if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
-                                    isOngoing = False
-                                continue
-                            else:
-                                time.sleep(2/len(image_names))
-                    if not newtasks:
-                        isOngoing = False
-                if filename:    # load all files matching the filename from google drive)
-                    try:
-                        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
-                    except:
-                        try:
-                            time.sleep(3)
-                            file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
-                        except:
-                            return -3              
-                    for file in file_list:
-                        if file['title'] == filename + ".tif":
-                            image_name = f"files/bands/{year}/{filename}.tif"
-                            try:
-                                file.GetContentFile(image_name)     # download file from G-drive to local folder
-                            except:
-                                continue
             try:
                 image_names.remove(image_name[17:-4])
                 if image_name.endswith('e.tif'):
