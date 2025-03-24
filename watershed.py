@@ -11,7 +11,7 @@ import geopandas as gpd
 import numpy as np
 from affine import Affine
 from pysheds.grid import Grid
-from shapely.geometry import LineString, MultiPolygon, Polygon, Point
+from shapely.geometry import LineString, MultiPolygon, Polygon
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
@@ -24,9 +24,9 @@ def map_to_pixels(x, y, grid_bounds, cellsize):
 
 # read in shapefile, the hydroshed DEM and adjust flats and depressions
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-03-5.shp").to_crs(epsg_crs)
-grid = Grid.from_raster('files/merged_dem.tif')
-dem = grid.read_raster('files/merged_dem.tif')
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-03-07.shp").to_crs(epsg_crs)
+grid = Grid.from_raster('files/sierra_nevada_merged.tif')
+dem = grid.read_raster('files/sierra_nevada_merged.tif')
 flooded_dem = grid.fill_depressions(dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
