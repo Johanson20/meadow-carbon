@@ -24,9 +24,9 @@ def map_to_pixels(x, y, grid_bounds, cellsize):
 
 # read in shapefile, the hydroshed DEM and adjust flats and depressions
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-11-5.shp").to_crs(epsg_crs)
-grid = Grid.from_raster('files/merged_dem.tif')
-dem = grid.read_raster('files/merged_dem.tif')
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-03-07.shp").to_crs(epsg_crs)
+grid = Grid.from_raster('files/sierra_nevada_merged.tif')
+dem = grid.read_raster('files/sierra_nevada_merged.tif')
 flooded_dem = grid.fill_depressions(dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
@@ -41,6 +41,7 @@ fdir = grid.flowdir(inflated_dem, dirmap=d8)
 # Delineate watershed using flow direction
 acc = grid.accumulation(fdir, dirmap=d8)
 watershed_polygons, meadowIds, x_pour_points, y_pour_points = [], [], [], []
+meadow_Areas, acc_val, value_type = [], [], []
 upland_areas, average_slopes = [], []
 
 def watershedValues(meadowIdx):
@@ -70,11 +71,15 @@ def watershedValues(meadowIdx):
         nrows, ncols = clipped_dem.shape
         grid_bounds = (new_affine[2], new_affine[5] + nrows * new_affine[4], new_affine[2] + ncols * new_affine[0], new_affine[5])
     
-        if len(set(clipped_dem.flatten())) > 1:     # ensure the values are different so there is a maximum flow cell
-            max_acc_cell = np.where(clipped_dem == clipped_dem.max())
+        if len(set(clipped_dem.flatten())) >= 1:     # ensure there are actual values (non-empty) so there is a maximum flow cell
+            flow_acc_val = clipped_dem.max().item()
+            max_acc_cell = np.where(clipped_dem == flow_acc_val)
             # pour point is cell of highest flow accumulation
             x_pour_point, y_pour_point = new_affine * (max_acc_cell[1][0], max_acc_cell[0][0])
+            val_type = "Maximum Flow Acc"
         else:
+            flow_acc_val = -99
+            val_type = "Lowest elevation"
             # Find elevation at each boundary point
             boundary_elevations = []
             for x, y in boundary_coords:
@@ -88,6 +93,11 @@ def watershedValues(meadowIdx):
             # pour point should be lowest elevation in meadow
             min_index = np.argmin(boundary_elevations)
             x_pour_point, y_pour_point = boundary_coords[min_index]
+        
+        acc_val.append(flow_acc_val)
+        meadow_Areas.append(meadowArea)
+        value_type.append(val_type)
+        if meadowIdx%100 == 0: print(meadowIdx, end=' ')
         
         # Convert pour point to grid indices
         lon, lat = x_pour_point, y_pour_point
@@ -128,8 +138,10 @@ for meadowIdx in shapefile.index:
 # write values to csv and delineated watersheds to a shapefile
 watersheds.to_csv("csv/watersheds.csv", index=False)
 watersheds_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'meadow_Id': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'uplandArea': upland_areas, 'avg_slope': average_slopes}, geometry = 'geometry', crs=shapefile.crs)
+points_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'ID': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'Area_km2': meadow_Areas, "Max_Flow_Acc": acc_val, "Value_Type": value_type}, geometry = 'geometry', crs=shapefile.crs)
 # Save watersheds to a new shapefile
 watersheds_gdf.to_file("files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
+points_gdf.to_file("files/Pour_points.shp", driver="ESRI Shapefile")
 
 # upland_area * 90**2     # Probable area in square meters
 # slope_at_pour/(90**2)   # Probable slope in degrees
