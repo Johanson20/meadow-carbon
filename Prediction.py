@@ -221,10 +221,10 @@ shapefile['crs'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
-# add a buffer of ~111km (1 latitude) to Sierra Nevada
+# add a buffer of 100m to Sierra Nevada
 minx, miny, maxx, maxy = shapefile.total_bounds
-merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy).buffer(1)], crs=epsg_crs)
-sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords))
+merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
+sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
 
 flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
