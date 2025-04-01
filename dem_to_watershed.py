@@ -17,11 +17,11 @@ import numpy as np
 from pysheds.grid import Grid
 import os
 
-mydir = "R:/SCRATCH/jonyegbula/meadow-carbon"
+mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
 
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-03-07.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 
 # Specify the folder containing raster files and open them as datasets
 raster_files = glob.glob("files/usgs_10m*.tif")
@@ -111,26 +111,24 @@ pts.to_file("files/sierra_pour_points.shp", driver="ESRI Shapefile")
 # read flowlines shapefile to snap pour points to closest flowline
 flowlines = gpd.read_file("files/sierra_nevada_flowlines.shp")
 ids_to_drop = []
-for idx in meadows.ID:
+for idx in pts.ID:
     meadow = meadows[meadows.ID == idx].iloc[0]
     # Get flowlines that intersect this meadow
     meadow_flowlines = flowlines[flowlines.intersects(meadow.geometry)]
+    meadow_pt = pts[pts.ID == idx]    # Get pour points inside the meadow
     
-    if not meadow_flowlines.empty:
-        meadow_pt = pts[pts.ID == idx]    # Get pour points inside the meadow
+    if not meadow_flowlines.empty and not meadow_pt.empty:
         if not meadow_flowlines.intersects(meadow_pt.geometry).any():
             # Move the pour point to the nearest point on the closest flowline
             new_point = nearest_points(meadow_pt.geometry, meadow_flowlines.geometry.unary_union)[1]
-            meadow_pt.loc[meadow_pt.index, :][-1] = new_point
+            pts.loc[meadow_pt.index[0], 'geometry'] = new_point.iloc[0]
     else:
         ids_to_drop.append(pts[pts.ID == idx].index[0])
-    
     if idx%100 == 0: print(idx, end=' ')
 
 # drop meadow IDs where no flowlines pass through
 snapped_pts = pts.drop(ids_to_drop)
 snapped_pts.reset_index(drop=True, inplace=True)
-
 # save the snapped pour points
 snapped_pts.to_file("files/snapped_sierra_pour_points.shp", driver="ESRI Shapefile")
 del points, points_gdf, pts_joined
