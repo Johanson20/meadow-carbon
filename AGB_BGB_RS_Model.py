@@ -316,8 +316,8 @@ import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
-# data = pd.read_csv("files/Belowground Biomass_RS Model_Data1.csv")  # soil carbon with summarized depths
-# data = pd.read_csv("files/Belowground Biomass_RS Model_Data.csv")   # soil carbon with separated depths
+# data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
+# data = pd.read_csv("csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
 data.head()
 # data['SampleDate'] = pd.to_datetime(data['SampleDate'])
 # data = data[data['SampleDate'].dt.year.isin([2015, 2016])]

@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore")
 epsg_crs = "EPSG:4326"
 burn_shapefile = gpd.read_file("files/California_Fire_Perimeters__all_.shp").to_crs(epsg_crs)
 burn_shapefile = burn_shapefile[burn_shapefile.YEAR_ >= '1984'].reset_index(drop=True)
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-11-5.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 
 # initialize final dataframe
 burn_results = pd.DataFrame(columns = ["ID", "Burn_year", "Sides"])

@@ -12,7 +12,7 @@ os.chdir("Code")
 # ee.Authenticate()
 ee.Initialize()
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-02-12.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp")
 
 feature = shapefile.iloc[4].geometry
 list(shapefile.columns)

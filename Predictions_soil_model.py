@@ -139,8 +139,11 @@ def interpolate_group(group):
     group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
     group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
     
-    group['Mean_Temperature'] = (group['Maximum_temperature'].mean() + group['Minimum_temperature'].mean())/2 - 273.15
+    # non-snow covered days
     integrals = group[group.NDSI <= 0.2]
+    integrals['NDVI_Ratio'] = (integrals['NDVI'] - min(integrals['NDVI']))/(max(integrals['NDVI']) - min(integrals['NDVI']))
+    # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
+    group['Active_growth_days'] = sum(integrals.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(integrals.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(integrals.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
     # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
     group['Snow_days'] = len(date_range) - integrals.shape[0]
     group['Wet_days'] = integrals[integrals.NDWI > 0.5].shape[0]
@@ -176,7 +179,7 @@ def maskAndRename(image):
 
 def loadYearCollection(year):
     # load GEE data for the relevant year and make folders for each year
-    global date_range, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, daymet_10, daymet_11
+    global date_range, start_year, end_year, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, daymet_10, daymet_11
     start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
     date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
     landsat_collection = landsat.filterDate(start_year, end_year)
@@ -198,17 +201,16 @@ def resample11(image):
 
 
 #load ML GBM models
-f = open('csv/models.pckl', 'rb')
-ghg_model, agb_model, bgb_model = pickle.load(f)
-f.close()
-f = open('csv/sd_models.pckl', 'rb')
-ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
-f.close()
+with open('csv/soil_models.pckl', 'rb') as f:
+    ghg_model, agb_model, bgb_model = pickle.load(f)
+with  open('csv/sd_models.pckl', 'rb') as f:
+    ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
+ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(agb_84_model.feature_names_in_), list(bgb_84_model.feature_names_in_)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-03-07.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
@@ -395,13 +397,6 @@ def prepareMeadows(meadowIdx):
     except:
         return -4
 
-year = 2019
-loadYearCollection(year)
-meadowIdx = 13742
-noBands = prepareMeadows(meadowIdx)
-noBands
-processMeadow((meadowIdx, noBands))
-
 
 def processMeadow(meadowCues):
     try:
@@ -484,7 +479,7 @@ def processMeadow(meadowCues):
             all_data['1SD_CO2'] = abs(sd_ghg - all_data['CO2.umol.m2.s'])
             all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
             all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
-            ghg_draws = np.random.normal(all_data['Rh'].to_frame(), all_data['1SD_Rh'].to_frame(), size=(len(all_data['Rh']), 100))
+            rh_draws = np.random.normal(all_data['Rh'].to_frame(), all_data['1SD_Rh'].to_frame(), size=(len(all_data['Rh']), 100))
     
             # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
             all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
@@ -492,17 +487,18 @@ def processMeadow(meadowCues):
             sd_agb = agb_84_model.predict(all_data.loc[:, agb_sd_col])
             all_data['1SD_ANPP'] = abs(sd_agb - all_data['HerbBio.g.m2'])
             sd_bgb = bgb_84_model.predict(all_data.loc[:, bgb_sd_col])
-            all_data['1SD_BNPP'] = abs(sd_bgb - all_data['Roots.kg.m2'])
+            bgb_sd = abs(sd_bgb - all_data['Roots.kg.m2'])
             all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
             all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-            all_data['BNPP'] = all_data['Roots.kg.m2']*0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
+            all_data['Root_Turnover'] = (all_data['Roots.kg.m2']*0.49 - ((all_data['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
+            all_data['Root_Exudates'] = all_data['Roots.kg.m2']*1000*all_data['Active_growth_days']*12*1.04e-4
+            all_data['BNPP'] = all_data['Root_Turnover'] + all_data['Root_Exudates']
             all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
-            all_data['1SD_BNPP'] *= 0.6*(0.2884*np.exp(0.046*all_data['Mean_Temperature']))*0.368*1e3
-            all_data['1SD_ANPP'] *= 0.433
-            agb_draws = np.random.normal(all_data['ANPP'].to_frame(), all_data['1SD_ANPP'].to_frame(), size=(len(all_data['ANPP']), 100))
-            bgb_draws = np.random.normal(all_data['BNPP'].to_frame(), all_data['1SD_BNPP'].to_frame(), size=(len(all_data['BNPP']), 100))
+            all_data['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*all_data['Active_growth_days']*12*0.104
+            anpp_draws = np.random.normal(all_data['ANPP'].to_frame(), all_data['1SD_ANPP'].to_frame(), size=(len(all_data['ANPP']), 100))
+            bnpp_draws = np.random.normal(all_data['BNPP'].to_frame(), all_data['1SD_BNPP'].to_frame(), size=(len(all_data['BNPP']), 100))
             all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
-            all_data['1SD_NEP'] = pd.Series(np.std((agb_draws + bgb_draws - ghg_draws), axis=1))
+            all_data['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
             
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
@@ -525,7 +521,7 @@ def processMeadow(meadowCues):
         return -4
 
 '''
-meadowIdx = 16423   # 16386 (largest), 17229 (smallest)
+meadowIdx = 16138   # 16103 (largest), 16914 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''

@@ -24,7 +24,7 @@ def map_to_pixels(x, y, grid_bounds, cellsize):
 
 # read in shapefile, the hydroshed DEM and adjust flats and depressions
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-03-07.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 grid = Grid.from_raster('files/sierra_nevada_merged.tif')
 dem = grid.read_raster('files/sierra_nevada_merged.tif')
 flooded_dem = grid.fill_depressions(dem)

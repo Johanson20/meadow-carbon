@@ -144,7 +144,7 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-11-5.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
