@@ -9,7 +9,7 @@ import rasterio
 from rasterio.merge import merge
 from rasterio.mask import mask
 from rasterio.features import geometry_mask
-from shapely.ops import nearest_points
+from shapely.ops import nearest_points, unary_union
 from shapely.geometry import Point, Polygon
 import glob
 import geopandas as gpd
@@ -44,7 +44,7 @@ with rasterio.open("files/sierra_nevada_10m.tif") as src:
     clipped_image, clipped_transform = mask(src, geoms, crop=True)
 out_meta.update({"driver": "GTiff", "height": clipped_image.shape[1],
     "width": clipped_image.shape[2], "transform": clipped_transform})
-# Save the output raster
+# Save the output raster (only if geoms was based on cascade meadows)
 with rasterio.open("files/cascade_nevada_10m.tif", "w", **out_meta) as dest:
     dest.write(clipped_image)
 del clipped_image    # save space
@@ -58,7 +58,7 @@ fdir = Grid.from_raster('files/FlowDirectionSierra.tif')
 fdir = fdir.read_raster('files/FlowDirectionSierra.tif')
 acc = Grid.from_raster('files/FlowAccumulationSierra.tif')
 acc = acc.read_raster('files/FlowAccumulationSierra.tif')
-transform = acc.affine
+transform = fdir.affine
 
 # compute flow direction and accumulation
 d8 = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -88,19 +88,19 @@ for row in range(acc_masked.shape[0]):
 
 # create geodataframe of points and extract flow accumulation values to them
 points_gdf = gpd.GeoDataFrame(geometry=points, crs=epsg_crs)
-points_gdf['Flow_accumulation'] = acc_masked[~np.isnan(acc_masked)]
+points_gdf['Flow_accum'] = acc_masked[~np.isnan(acc_masked)]
 points_gdf.head()
 del meadow_mask, acc_masked
 
 # spatially join points to meadows, to extract max flow accumulation per ID
 pts_joined = gpd.sjoin(points_gdf, meadows, how="left", predicate="within")
-pts_joined.dropna(subset=['ID', 'Flow_accumulation'], inplace=True)
+pts_joined.dropna(subset=['ID', 'Flow_accum'], inplace=True)
 pts_joined.reset_index(drop=True, inplace=True)
 pts_joined.head()
 pts_joined.columns
 pts_joined.drop(columns=list(pts_joined.columns)[7:-1] + ['index_right'], axis=1, inplace=True)
 len(set(pts_joined.ID))
-pts = pts_joined.loc[pts_joined.groupby("ID")['Flow_accumulation'].idxmax()]
+pts = pts_joined.loc[pts_joined.groupby("ID")['Flow_accum'].idxmax()]
 pts.reset_index(drop=True, inplace=True)
 pts.Flow_accumulation = pts.Flow_accumulation/1000  # division due to data limuts of values
 pts.head()
@@ -113,14 +113,16 @@ flowlines = gpd.read_file("files/sierra_nevada_flowlines.shp")
 ids_to_drop = []
 for idx in pts.ID:
     meadow = meadows[meadows.ID == idx].iloc[0]
-    # Get flowlines that intersect this meadow
+    # Get flowlines that intersect this meadow and entirely within meadow boundary
     meadow_flowlines = flowlines[flowlines.intersects(meadow.geometry)]
     meadow_pt = pts[pts.ID == idx]    # Get pour points inside the meadow
     
-    if not meadow_flowlines.empty and not meadow_pt.empty:
-        if not meadow_flowlines.intersects(meadow_pt.geometry).any():
+    # check if there is at least one flowline in meadow, and it doesn't already intersect the pour point
+    if not meadow_flowlines.empty and not meadow_flowlines.intersects(meadow_pt.geometry).any():
+            clipped_flowlines = meadow_flowlines.intersection(meadow.geometry)
+            clipped_flowlines = clipped_flowlines[~clipped_flowlines.is_empty]
             # Move the pour point to the nearest point on the closest flowline
-            new_point = nearest_points(meadow_pt.geometry, meadow_flowlines.geometry.unary_union)[1]
+            new_point = nearest_points(meadow_pt.geometry, clipped_flowlines.geometry.unary_union)[1]
             pts.loc[meadow_pt.index[0], 'geometry'] = new_point.iloc[0]
     else:
         ids_to_drop.append(pts[pts.ID == idx].index[0])
@@ -145,19 +147,18 @@ for idx in range(pts.shape[0]):
     Y_coords.append(y_pour_point)
     Max_Flow_Acc.append(row.Flow_accum)
     # delineate unique watershed and convert to polygon (after including grid/raster)
-    watershed = grid.catchment(x_pour_point, y_pour_point, fdir, dirmap=d8, xytype='coordinate')
-    # watersheds.append(watershed)
-    mask = watershed.astype(bool)
+    ws_mask = grid.catchment(x_pour_point, y_pour_point, fdir, dirmap=d8, xytype='coordinate')
+    mask = ws_mask.astype(bool)
     rows, cols = np.where(mask)
     coords = [transform*(c,r) for r, c in zip(rows, cols)]
     if len(coords) > 2:
         water_poly.append(Polygon(coords))
-        validPoly.append(idx)
+        validPoly.append(int(idx))
     if idx%50 == 0: print(idx, end=' ')
 
 # create the watersheds polygons file and save
-watershed_gdf = gpd.GeoDataFrame({'Meadow_ID': validPoly, 'MaxFlowAcc': [Max_Flow_Acc[i] for i in validPoly], 'X_Pour_Pt': [X_coords[i] for i in validPoly], 'Y_Pour_Pt': [Y_coords[i] for i in validPoly]}, geometry=water_poly, crs=epsg_crs)
-watershed_gdf.to_file("files/cascade_watershed_polygons.shp", driver="ESRI Shapefile")
+watershed_gdf = gpd.GeoDataFrame({'Meadow_ID': [int(pts.loc[i, 'ID']) for i in validPoly], 'MaxFlowAcc': [Max_Flow_Acc[i] for i in validPoly], 'X_Pour_Pt': [X_coords[i] for i in validPoly], 'Y_Pour_Pt': [Y_coords[i] for i in validPoly]}, geometry=water_poly, crs=epsg_crs)
+watershed_gdf.to_file("files/sierra_watershed_polygons.shp", driver="ESRI Shapefile")
 
 # save the watershed raster
 watershed_raster = np.zeros_like(fdir)
