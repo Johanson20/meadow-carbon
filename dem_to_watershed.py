@@ -16,9 +16,11 @@ import geopandas as gpd
 import numpy as np
 from pysheds.grid import Grid
 import os
+import warnings
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
+warnings.filterwarnings("ignore")
 
 epsg_crs = "EPSG:4326"
 meadows = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
@@ -49,15 +51,15 @@ with rasterio.open("files/cascade_nevada_10m.tif", "w", **out_meta) as dest:
     dest.write(clipped_image)
 del clipped_image    # save space
 
-grid = Grid.from_raster('files/sierra_nevada_10m.tif')
-dem = grid.read_raster('files/sierra_nevada_10m.tif')
+grid = Grid.from_raster('files/hydroDEM_merged.tif')
+dem = grid.read_raster('files/hydroDEM_merged.tif')
 flooded_dem = grid.fill_depressions(dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
-fdir = Grid.from_raster('files/FlowDirectionSierra.tif')
-fdir = fdir.read_raster('files/FlowDirectionSierra.tif')
-acc = Grid.from_raster('files/FlowAccumulationSierra.tif')
-acc = acc.read_raster('files/FlowAccumulationSierra.tif')
+fdir = Grid.from_raster('files/FlowDirection.tif')
+fdir = fdir.read_raster('files/FlowDirection.tif')
+acc = Grid.from_raster('files/FlowAccumulation.tif')
+acc = acc.read_raster('files/FlowAccumulation.tif')
 transform = fdir.affine
 
 # compute flow direction and accumulation
@@ -92,6 +94,7 @@ points_gdf = gpd.GeoDataFrame(geometry=points, crs=epsg_crs)
 points_gdf['Flow_accum'] = acc_masked[~np.isnan(acc_masked)]
 points_gdf.head()
 del acc_masked
+# grid = Grid.from_raster('files/FlowDirection.tif')
 
 # spatially join points to meadows, to extract max flow accumulation per ID
 pts_joined = gpd.sjoin(points_gdf, meadows, how="left", predicate="within")
@@ -130,11 +133,17 @@ for idx in pts.ID:
         ids_to_drop.append(pts[pts.ID == idx].index[0])
     if idx%100 == 0: print(int(idx), end=' ')
 
-# drop meadow IDs where no flowlines pass through
+# drop meadows where no flowlines pass through
 snapped_pts = pts.drop(ids_to_drop)
 snapped_pts.reset_index(drop=True, inplace=True)
-# save the snapped pour points
+snapped_meadows = meadows[meadows['ID'].isin([int(x) for x in snapped_pts.ID])]
+snapped_meadows.reset_index(drop=True, inplace=True)
+pts2 = pts[pts['ID'].isin([int(x) for x in snapped_pts.ID])]
+pts2.reset_index(drop=True, inplace=True)
+# save the snapped pour points and meadows
+pts2.to_file("files/sierra_sub_pour_points.shp", driver="ESRI Shapefile")
 snapped_pts.to_file("files/snapped_sierra_pour_points.shp", driver="ESRI Shapefile")
+snapped_meadows.to_file("files/snapped_sierra_meadows.shp", driver="ESRI Shapefile")
 
 # create watershed from pour point row-col coordinates and flow direction
 IDs, X_coords, Y_coords, Max_Flow_Acc = [], [], [], []
