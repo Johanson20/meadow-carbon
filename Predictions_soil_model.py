@@ -77,7 +77,6 @@ def geotiffToCsv(input_raster, bandnames):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
-    
     return out_csv
 
 
@@ -107,7 +106,6 @@ def processGeotiff(df):
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
     df['NDPI'] = (df['NIR'] - (0.56*df['Red'] + 0.44*df['SWIR_2']))/(df['NIR'] + 0.56*df['Red'] + 0.44*df['SWIR_2'])
     df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
-    
     return df
 
 
@@ -159,7 +157,6 @@ def interpolate_group(group):
     group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
     group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
-    
     return group.head(1)
 
 
@@ -191,7 +188,139 @@ def loadYearCollection(year):
     daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
     os.makedirs(f"files/{year}", exist_ok=True)
     os.makedirs(f"files/bands/{year}", exist_ok=True)
+
+
+def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None):
+    subregions = [shapefile_bbox] if makeSubRegions else 1
+    if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions
+        xmin, ymin, xmax, ymax = feature.geometry.bounds
+        num_subregions = round(np.sqrt(feature.Area_km2/10))
+        subregion_width = (xmax - xmin) / num_subregions
+        subregion_height = (ymax - ymin) / num_subregions
+        subregions = [] if makeSubRegions else 1
+        for i in range(num_subregions):
+            for j in range(num_subregions):
+                subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
+                                   (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
+                                   (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
+                if subarea.intersects(feature.geometry):
+                    if makeSubRegions:
+                        subregion = ee.Geometry.Rectangle(list(subarea.bounds))
+                        subregions.append(subregion.intersection(shapefile_bbox))
+                    else:
+                        subregions += 1
+    return subregions
+
+
+def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
+    # clip flow, slope and daymet to meadow's bounds
+    if crs == "EPSG:32611":
+        flow_30m = flow_acc_11.clip(shapefile_bbox)
+        slope_30m = slope_11.clip(shapefile_bbox)
+        swe_30m = daymet_11.clip(shapefile_bbox)
+        shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
+        deep_clay = deep_perc_clay_11.clip(shapefile_bbox)
+        shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox)
+        deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox)
+        shall_org = shallow_organic_m_11.clip(shapefile_bbox)
+    else:
+        flow_30m = flow_acc_10.clip(shapefile_bbox)
+        slope_30m = slope_10.clip(shapefile_bbox)
+        swe_30m = daymet_10.clip(shapefile_bbox)
+        shall_clay = shallow_perc_clay.clip(shapefile_bbox)
+        deep_clay = deep_perc_clay.clip(shapefile_bbox)
+        shall_hydra = shallow_hydra_cond.clip(shapefile_bbox)
+        deep_hydra = deep_hydra_cond.clip(shapefile_bbox)
+        shall_org = shallow_organic_m.clip(shapefile_bbox)
+    combined_image, residue_image = None, None
+    noBands, bandnames1 = 19, 0
+    noImages = len(dates)
     
+    # iterate through each landsat image and align data types (float32)
+    for idx in range(noImages):
+        landsat_image = ee.Image(image_list.get(idx))
+        # use each date in which landsat image exists to extract bands of gridmet
+        start_date = relativedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
+        date = datetime.strftime(start_date, '%Y-%m-%d')
+        next_day = (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')
+        target_month = date[:-2] + "01"
+        next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
+        if crs == "EPSG:32610":
+            gridmet_30m = gridmet_10.filterBounds(shapefile_bbox).filterDate(date, next_day).first()
+            tclimate_30m = terraclimate_10.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first()
+        else:
+            gridmet_30m = gridmet_11.filterBounds(shapefile_bbox).filterDate(date, next_day).first()
+            tclimate_30m = terraclimate_11.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first()
+        date_band = ee.Image.constant(dates[idx]).rename('Date')
+        
+        # align other satellite data with landsat and make resolution (30m)
+        if idx == 0:     # extract constant values once for the same meadow
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
+            if noImages > 92:   # split image when bands would exceed 1024
+                bandnames1 = 19
+                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
+        else:
+            if noBands < 1013:
+                noBands += 11     # 11 total of recurring bands
+                combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
+            else:
+                bandnames1 += 11
+                residue_image = residue_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
+        if residue_image:
+            residue_image = residue_image.toFloat()
+    return [combined_image.toFloat(), residue_image, noBands, bandnames1]
+
+
+def downloadFinishedTasks(image_names):
+    if not 'tasks' in globals():
+        tasks = ee.batch.Task.list()
+    taskImages = image_names.copy()
+    while taskImages:    # read in each downloaded image, process and stack them into a dataframe
+        image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in taskImages][0]
+        # check that the image isn't already downloaded and it isn't a residue image (which won't be in G_drive)
+        if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
+            tasks = [task for task in tasks if task.config['description'] in taskImages]
+            isOngoing = True
+            filename = ""
+            while isOngoing:
+                newtasks = []
+                for t_k in range(len(tasks)):
+                    task = tasks[t_k]
+                    if task.status()['description'] in taskImages and task.status()['creation_timestamp_ms'] > current_time:
+                        newtasks.append(task)
+                        if task.status()['state'] == 'COMPLETED':
+                            filename = task.status()['description']
+                            isOngoing = False
+                            break
+                        elif task.status()['state'] == 'FAILED':
+                            if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
+                                isOngoing = False
+                            continue
+                        else:
+                            time.sleep(2/len(taskImages))
+                if not newtasks:
+                    isOngoing = False
+            if filename:    # load all files matching the filename from google drive)
+                try:
+                    file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
+                except:
+                    try:
+                        time.sleep(1.1)
+                        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
+                    except:
+                        return -3      # no filename matching the image_name is found    
+                for file in file_list:
+                    if file['title'] == filename + ".tif":
+                        image_name = f"files/bands/{year}/{filename}.tif"
+                        try:
+                            file.GetContentFile(image_name)     # download file from G-drive to local folder
+                        except:
+                            continue
+        taskImages.remove(image_name[17:-4])
+    return 0
+
+
 # resample and reproject when pixel size is greater than 30m
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
@@ -266,6 +395,7 @@ current_time = datetime.strptime('20/01/2025', '%d/%m/%Y').timestamp()*1000
 year = 2021
 loadYearCollection(year)
 
+
 def prepareMeadows(meadowIdx):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
@@ -284,87 +414,17 @@ def prepareMeadows(meadowIdx):
         try:
             image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
         except:
-            time.sleep(3)
+            time.sleep(1.1)
             try:
                 image_result = ee.Dictionary({'image_dates': landsat_images.aggregate_array('system:time_start')}).getInfo()
             except:
                 print(f"Meadow {meadowId} threw an exception!")
                 return -3
         dates = [date/1000 for date in image_result['image_dates']]
-        noImages = len(dates)
-        if not noImages:
+        if not len(dates):
             return -1
-        
-        # clip flow, slope and daymet to meadow's bounds
-        if mycrs == "EPSG:32611":
-            flow_30m = flow_acc_11.clip(shapefile_bbox).toFloat()
-            slope_30m = slope_11.clip(shapefile_bbox).toFloat()
-            swe_30m = daymet_11.clip(shapefile_bbox).toFloat()
-            shall_clay = shallow_perc_clay_11.clip(shapefile_bbox).toFloat()
-            deep_clay = deep_perc_clay_11.clip(shapefile_bbox).toFloat()
-            shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox).toFloat()
-            deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox).toFloat()
-            shall_org = shallow_organic_m_11.clip(shapefile_bbox).toFloat()
-        else:
-            flow_30m = flow_acc_10.clip(shapefile_bbox).toFloat()
-            slope_30m = slope_10.clip(shapefile_bbox).toFloat()
-            swe_30m = daymet_10.clip(shapefile_bbox).toFloat()
-            shall_clay = shallow_perc_clay.clip(shapefile_bbox).toFloat()
-            deep_clay = deep_perc_clay.clip(shapefile_bbox).toFloat()
-            shall_hydra = shallow_hydra_cond.clip(shapefile_bbox).toFloat()
-            deep_hydra = deep_hydra_cond.clip(shapefile_bbox).toFloat()
-            shall_org = shallow_organic_m.clip(shapefile_bbox).toFloat()
-        
-        combined_image, residue_image = None, None
-        noBands, bandnames1 = 19, 0
-        subregions = [shapefile_bbox]
-        
-        # iterate through each landsat image and align data types (float32)
-        for idx in range(noImages):
-            landsat_image = ee.Image(image_list.get(idx)).toFloat()
-            # use each date in which landsat image exists to extract bands of gridmet
-            start_date = relativedelta(seconds = dates[idx]) + datetime(1970, 1, 1)
-            date = datetime.strftime(start_date, '%Y-%m-%d')
-            next_day = (start_date + relativedelta(days=1)).strftime('%Y-%m-%d')
-            target_month = date[:-2] + "01"
-            next_month = (start_date + relativedelta(months=1)).replace(day=1).strftime('%Y-%m-%d')
-            if mycrs == "EPSG:32610":
-                gridmet_30m = gridmet_10.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
-                tclimate_30m = terraclimate_10.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
-            else:
-                gridmet_30m = gridmet_11.filterBounds(shapefile_bbox).filterDate(date, next_day).first().toFloat()
-                tclimate_30m = terraclimate_11.filterBounds(shapefile_bbox).filterDate(target_month, next_month).first().toFloat()
-            date_band = ee.Image.constant(dates[idx]).rename('Date').toFloat()
-            
-            # align other satellite data with landsat and make resolution (30m)
-            if idx == 0:     # extract constant values once for the same meadow
-                combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
-                if noImages > 92:   # split image when bands would exceed 1024
-                    bandnames1 = 19
-                    residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
-            else:
-                if noBands < 1013:
-                    noBands += 11     # 11 total of recurring bands
-                    combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
-                else:
-                    bandnames1 += 11
-                    residue_image = residue_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
-        
-        if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions to stay within limit of image downloads
-            xmin, ymin, xmax, ymax = feature.geometry.bounds
-            num_subregions = round(np.sqrt(feature.Area_km2/10))
-            subregion_width = (xmax - xmin) / num_subregions
-            subregion_height = (ymax - ymin) / num_subregions
-            subregions = []
-            for i in range(num_subregions):
-                for j in range(num_subregions):
-                    subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
-                                       (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
-                    if subarea.intersects(feature.geometry):
-                        subregion = ee.Geometry.Rectangle(list(subarea.bounds))
-                        subregions.append(subregion.intersection(shapefile_bbox))
+        combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
+        subregions = splitMeadowBounds(feature, True, shapefile_bbox)
     
         # either directly download images of small meadows locally or export large ones to google drive before downloading locally
         for i, subregion in enumerate(subregions):
@@ -373,14 +433,14 @@ def prepareMeadows(meadowIdx):
                 with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                     geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                     if not os.path.exists(image_name):
-                        time.sleep(1.5)
+                        time.sleep(1.1)
                         with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                     if bandnames1 > 19 and os.path.exists(image_name):
                         extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                         geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
                         if not os.path.exists(extra_image_name):
-                            time.sleep(1.5)
+                            time.sleep(1.1)
                             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                                 geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
             if not os.path.exists(image_name):    # merge both images for g-drive download
@@ -402,7 +462,7 @@ def processMeadow(meadowCues):
     try:
         meadowIdx, totalBands = meadowCues
         if totalBands <= 19:
-            return -1
+            return -1   # if no GEE data is available for the meadow's buffer
         feature = shapefile.loc[meadowIdx, :]
         meadowId, mycrs = int(feature.ID), feature.crs
             
@@ -414,21 +474,7 @@ def processMeadow(meadowCues):
         image_names = set()
         bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe', 'shall_clay', 'deep_clay', 'shall_hydra', 'deep_hydra', 'shall_org']
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
-        subregions = 1
-            
-        if feature.Area_km2 > 22:     # split bounds of large meadows into subregions
-            xmin, ymin, xmax, ymax = feature.geometry.bounds
-            num_subregions = round(np.sqrt(feature.Area_km2/10))
-            subregion_width = (xmax - xmin) / num_subregions
-            subregion_height = (ymax - ymin) / num_subregions
-            for i in range(num_subregions):
-                for j in range(num_subregions):
-                    subarea = Polygon([(xmin + i*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + j*subregion_height),
-                                       (xmin + (i+1)*subregion_width, ymin + (j+1)*subregion_height),
-                                       (xmin + i*subregion_width, ymin + (j+1)*subregion_height)])
-                    if subarea.intersects(feature.geometry):
-                        subregions += 1
+        subregions = splitMeadowBounds(feature, False)
     
         # process each image subregion and bandnames order
         for i in range(subregions):
@@ -450,11 +496,10 @@ def processMeadow(meadowCues):
                 bandnames1 = bandnames1.copy() + bandnames1[:11]
                 noBands1 -= 11
         
-        if not 'tasks' in globals():
-            tasks = ee.batch.Task.list()
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
-            # check that the image isn't already downloaded and it isn't a residue image (which won't be in G_drive)
+            if downloadFinishedTasks(image_names) == -3:
+                return -3   # for failure in downloading completed GEE tasks
             try:
                 image_names.remove(image_name[17:-4])
                 if image_name.endswith('e.tif'):
@@ -514,7 +559,7 @@ def processMeadow(meadowCues):
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
         else:
-            meadowIdx = -2
+            meadowIdx = -2  # if all_data is an empty dataframe
         
         return meadowIdx
     except:
