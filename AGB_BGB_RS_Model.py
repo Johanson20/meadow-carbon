@@ -38,7 +38,6 @@ def calculateIndices(image):
     # rename bands and  normalize raw reflectance values
     scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
-    
     # add indices
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
     ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
@@ -47,7 +46,6 @@ def calculateIndices(image):
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
-    
     return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi])
 
 
@@ -100,11 +98,9 @@ def extractAllValues(landsat, year):
     # Active growing season is also when NDVI >= 0.2 without snow or water coverage
     integrals = integrals[(integrals.NDWI <= 0.5) & (integrals.NDVI >= 0.2)]
     integrals = integrals.sum()
-    
     # Compute indices for previous 5 years of june and sept
     june_prev_5 = df_prev_5[df_prev_5.index.month == 6]
     sept_prev_5 = df_prev_5[df_prev_5.index.month == 9]
-    
     return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode(), integrals, no_snow_days, no_wet_days]
 
 
@@ -347,28 +343,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")
-# data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
-# data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
-# data = pd.read_csv("csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
-data.head()
-# data['SampleDate'] = pd.to_datetime(data['SampleDate'])
-# data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
+data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
+'''data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
+data = pd.read_csv("csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
+data['SampleDate'] = pd.to_datetime(data['SampleDate'])
+data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
 # confirm column names first
+cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column'''
+data.head()
 cols = data.columns
-# cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:-1])
+var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
+'''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
+var_col = list(cols[9:-1]) # for the 5-year averaged data (next 2 lines)
 var_col.remove('Elevation')
 var_col.remove('dRed')
-# var_col =  list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
-# var_col =  list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
-# var_col =  list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths
+var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -405,18 +401,19 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_model = GradientBoostingRegressor(random_state=10)
-'''# for the old "Data" (without 5 year averages)
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=75, subsample=0.8, validation_fraction=0.2,
-                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 # soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
+                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+'''# for the 5-year averaged data
+bgb_model = GradientBoostingRegressor(random_state=10)
+# for the old "Data" (without 5 year averages)
+bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.1, alpha=0.8413, max_depth=4, 
-                                      n_estimators=75, subsample=0.8, validation_fraction=0.2, n_iter_no_change=50,  
+bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.07, alpha=0.8413, max_depth=3, 
+                                      n_estimators=200, subsample=0.3, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 
 bgb_model.fit(X_train, y_train)

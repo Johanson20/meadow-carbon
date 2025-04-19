@@ -38,10 +38,12 @@ def maskAndRename(image):
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
 
+
 # Calculates absolute time difference (in days) from a target date, in which the images are acquired
 def calculate_time_difference(image):
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
+
 
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
 def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
@@ -54,7 +56,6 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
     
     if not noImages:
         return [[0], None, None, None]
-    
     image_list = sorted_collection.toList(sorted_collection.size())
     nImage, band_values = 0, {'Blue': None}
     
@@ -64,7 +65,6 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
         nImage += 1
         value = nearest_image.getInfo()['properties']
         band_values = nearest_image.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    
     return [band_values, value['time_difference'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
 

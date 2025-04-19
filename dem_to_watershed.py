@@ -53,27 +53,28 @@ del clipped_image    # save space
 
 grid = Grid.from_raster('files/hydroDEM_merged.tif')
 dem = grid.read_raster('files/hydroDEM_merged.tif')
-flooded_dem = grid.fill_depressions(dem)
+pit_filled_dem = grid.fill_pits(dem)
+flooded_dem = grid.fill_depressions(pit_filled_dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
 fdir = Grid.from_raster('files/FlowDirection.tif')
 fdir = fdir.read_raster('files/FlowDirection.tif')
-acc = Grid.from_raster('files/FlowAccumulation.tif')
+acc = Grid.from_raster('files/FlowDirection.tif')
 acc = acc.read_raster('files/FlowAccumulation.tif')
 transform = fdir.affine
 
 # compute flow direction and accumulation
-d8 = (1, 2, 4, 8, 16, 32, 64, 128)
+d8 = (64, 128, 1, 2, 4, 8, 16, 32)
 fdir = grid.flowdir(inflated_dem, dirmap=d8)
 acc = grid.accumulation(fdir, dirmap=d8)
 out_meta.update(dtype=rasterio.float32, count=1, nodata=-9999, height=acc.shape[0],
     width=acc.shape[1], transform=transform)  # update metadata
-del flooded_dem, inflated_dem
+del pit_filled_dem, flooded_dem, inflated_dem
 
 # save rasters (optional)
-with rasterio.open("files/flow_direction.tif", "w", **out_meta) as dest:
+with rasterio.open("files/FlowDirection.tif", "w", **out_meta) as dest:
     dest.write(fdir, 1)
-with rasterio.open("files/flow_accumulation.tif", "w", **out_meta) as dest:
+with rasterio.open("files/FlowDirection.tif", "w", **out_meta) as dest:
     dest.write(acc, 1)
 
 # convert meadows to raster mask and apply to flow accumulation for each meadow
@@ -158,11 +159,11 @@ for idx in range(pts.shape[0]):
     Max_Flow_Acc.append(row.Flow_accum)
     # delineate unique watershed and convert to polygon (after including grid/raster)
     ws_mask = grid.catchment(x_pour_point, y_pour_point, fdir, dirmap=d8, xytype='coordinate')
-    mask = ws_mask.astype(bool)
-    rows, cols = np.where(mask)
+    ws_mask = ws_mask.astype(bool)
+    rows, cols = np.where(ws_mask)
     coords = [transform*(c,r) for r, c in zip(rows, cols)]
     if len(coords) > 2:
-        water_poly.append(Polygon(coords))
+        water_poly.append(Polygon(coords).simplify(0.00001))
         validPoly.append(idx)
     if idx%50 == 0: print(idx, end=' ')
 
