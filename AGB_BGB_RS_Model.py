@@ -101,7 +101,7 @@ def extractAllValues(landsat, year):
     # Compute indices for previous 5 years of june and sept
     june_prev_5 = df_prev_5[df_prev_5.index.month == 6]
     sept_prev_5 = df_prev_5[df_prev_5.index.month == 9]
-    return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode(), integrals, no_snow_days, no_wet_days]
+    return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode().iloc[0], integrals, no_snow_days, no_wet_days]
 
 
 def resample10(image):
@@ -132,35 +132,40 @@ daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample
 terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample11)
 gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
 
-# these polaris soil datasets have 30m spatial resolution (same as landsat above)
+# these polaris soil datasets have 30m spatial resolution (same as landsat above); lithology is 90m resolution
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 perc_sand = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample10)
 lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32610", scale=30)
+organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
 shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
 deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
 shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_perc_sand = ee.ImageCollection(perc_sand.toList(3)).mean()
 deep_perc_sand = ee.Image(perc_sand.toList(6).get(3))
+shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 
+# same as above but for EPSG 32611 (above is 32610)
 perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
 hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
 perc_sand_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample11)
 lithology_11 = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32611", scale=30)
+organic_m_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample11)
 shallow_perc_clay_11 = ee.ImageCollection(perc_clay_11.toList(3)).mean()
 deep_perc_clay_11 = ee.Image(perc_clay_11.toList(6).get(3))
 shallow_hydra_cond_11 = ee.ImageCollection(hydra_cond_11.toList(3)).mean()
 deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
 shallow_perc_sand_11 = ee.ImageCollection(perc_sand_11.toList(3)).mean()
 deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
+shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
 
 dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
-dNDWI, dEVI, dSAVI, dBSI, dNDPI = [], [], [], [], []
+dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI = [], [], [], [], [], [], []
 NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer = [], [], [], [], []
 NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall = [], [], [], [], []
 flow, slope, elevation, wet, snowy = [], [], [], [], []
-mean_annual_pr, swe, et, cdef, min_temp, max_temp = [], [], [], [], [], []
+mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
 # populate bands by applying above functions for each pixel in dataframe
@@ -172,7 +177,7 @@ for idx in range(data.shape[0]):
     year, month, day = target_date.split("-")
     next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
-    if int(year) > 2024:    # 2024 data still seems unavailable
+    if int(year) > 2023:    # 2024 data still seems unavailable
         data.drop(idx, inplace=True)
         print("Row", idx, "dropped!")
         continue
@@ -206,6 +211,7 @@ for idx in range(data.shape[0]):
         shallow_sand = shallow_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
@@ -221,6 +227,7 @@ for idx in range(data.shape[0]):
         shallow_sand = shallow_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         
     swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
@@ -249,11 +256,13 @@ for idx in range(data.shape[0]):
     dNIR.append(integrals['NIR'])
     dSWIR_1.append(integrals['SWIR_1'])
     dSWIR_2.append(integrals['SWIR_2'])
+    dNDVI.append(integrals['NDVI'])
     dNDWI.append(integrals['NDWI'])
     dEVI.append(integrals['EVI'])
     dSAVI.append(integrals['SAVI'])
     dBSI.append(integrals['BSI'])
     dNDPI.append(integrals['NDPI'])
+    dNDSI.append(integrals['NDSI'])
     
     wet.append(wet_days)
     snowy.append(snow_days)
@@ -274,6 +283,7 @@ for idx in range(data.shape[0]):
     Deep_Clay.append(deep_clay)
     Deep_Sand.append(deep_sand)
     Deep_Hydra.append(deep_hydra)
+    Organic_Matter.append(shall_org)
     
     if idx%50 == 0: print(idx, end=' ')
 
@@ -297,11 +307,13 @@ data['dRed'] = dRed
 data['dNIR'] = dNIR
 data['dSWIR_1'] = dSWIR_1
 data['dSWIR_2'] = dSWIR_2
+data['dNDVI'] = dNDVI
 data['dNDWI'] = dNDWI
 data['dEVI'] = dEVI
 data['dSAVI'] = dSAVI
 data['dBSI'] = dBSI
 data['dNDPI'] = dNDPI
+data['dNDSI'] = dNDSI
 
 data['Cdef'] = cdef
 data['Elevation'] = elevation
@@ -322,6 +334,7 @@ data['Deep_Sand'] = Deep_Sand
 data['Shallow_Hydra_Conduc'] = Shallow_Hydra
 data['Deep_Hydra_Conduc'] = Deep_Hydra
 data['Lithology'] = Lithology
+data['Organic_Matter'] = Organic_Matter
 
 data.reset_index(drop=True, inplace=True)
 data.head()
@@ -343,8 +356,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
-'''data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+'''data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
 data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
 data = pd.read_csv("csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
 data['SampleDate'] = pd.to_datetime(data['SampleDate'])
@@ -359,11 +372,9 @@ data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
+var_col = list(cols[21:])   # for the 5-year averaged data
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
-var_col = list(cols[9:-1]) # for the 5-year averaged data (next 2 lines)
-var_col.remove('Elevation')
-var_col.remove('dRed')
+var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -401,11 +412,11 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-# soil carbon with summarized depths
+# for the 5-year averaged data
+bgb_model = GradientBoostingRegressor(random_state=10)
+'''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-'''# for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(random_state=10)
 # for the old "Data" (without 5 year averages)
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
