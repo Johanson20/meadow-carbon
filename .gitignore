@@ -1,4 +1,5 @@
 client_secrets.json
 desktop.ini
 files/
+.ipynb_checkpoints/
 mycreds.txt
