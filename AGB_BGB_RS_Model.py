@@ -16,6 +16,14 @@ os.chdir(mydir)
 filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
+'''
+data.columns
+data.loc[:, ['Longitude', 'Latitude']].describe()
+idx = data[data['Longitude'] > -116].index
+data.loc[idx, 'Longitude'] -= 100
+data.drop("Unnamed: 0", axis=1, inplace=True)
+data.to_csv(filename, index=False)
+'''
 data = pd.read_csv(filename)
 data.head()
 data.drop_duplicates(inplace=True)  # remove duplicate rows
@@ -73,7 +81,7 @@ def getBandValues(image):
 def extractAllValues(landsat, year):
     landsat_values = landsat.map(getBandValues).getInfo()['features']
     if not landsat_values:
-        return [{'Blue': None}, {'Blue': None}, {'Blue': None}, 0, 0]
+        return [{'Blue': None}, {'Blue': None}, 0, {'Blue': None}, 0, 0]
     values = []
     for feature in landsat_values:
         values.append(feature['properties'])
@@ -121,15 +129,13 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample10)
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample10)
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample10)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample10)
 
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
-daymet_11 = ee.ImageCollection("NASA/ORNL/DAYMET_V4").select('swe').map(resample11)
-terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr']).map(resample11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample11)
 gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
 
 # these polaris soil datasets have 30m spatial resolution (same as landsat above); lithology is 90m resolution
@@ -177,15 +183,11 @@ for idx in range(data.shape[0]):
     year, month, day = target_date.split("-")
     next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
-    if int(year) > 2023:    # 2024 data still seems unavailable
-        data.drop(idx, inplace=True)
-        print("Row", idx, "dropped!")
-        continue
     
     landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, year+"-10-01")
     bands_June, bands_Sept, utm, integrals, snow_days, wet_days = extractAllValues(landsat, year)
     
-    if not bands_June['NDWI'] or not bands_Sept['NDWI']:     # drop rows that returned no value
+    if not bands_June['Blue'] or not bands_Sept['Blue']:     # drop rows that returned no value
         data.drop(idx, inplace=True)
         print("Row", idx, "dropped!")
         continue
@@ -198,7 +200,7 @@ for idx in range(data.shape[0]):
     mycrs = 'EPSG:326' + str(utm)
     if mycrs == "EPSG:32611":
         tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
-        daymetv4 = daymet_11.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+        daymet = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         max_tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").max()
         min_tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").min()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
@@ -214,7 +216,7 @@ for idx in range(data.shape[0]):
         shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
-        daymetv4 = daymet.filterBounds(point).filterDate(year + '-04-01', year + '-04-02').first()
+        daymet = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         max_tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").max()
         min_tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").min()
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
@@ -229,11 +231,11 @@ for idx in range(data.shape[0]):
         lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         
-    swe_value = daymetv4.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    swe_value = daymet.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     mean_pr = tclimate['pr']
-    cdef_value = tclimate['def']
-    aet = tclimate['aet']
+    cdef_value = 0.1*tclimate['def']
+    aet = 0.1*tclimate['aet']
     temps = min_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temps['tmmn']
     temps = max_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
@@ -285,7 +287,7 @@ for idx in range(data.shape[0]):
     Deep_Hydra.append(deep_hydra)
     Organic_Matter.append(shall_org)
     
-    if idx%50 == 0: print(idx, end=' ')
+    if idx%20 == 0: print(idx, end=' ')
 
 # checks if they are all cloud free (should equal data.shape[0])
 len([x for x in dNIR if x])

@@ -12,16 +12,24 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("csv/GHG Flux_RS Model.csv")
+filename = "csv/GHG Flux_RS Model.csv"
+data = pd.read_csv(filename)
+'''
+data.columns
+data.loc[:, ['Longitude', 'Latitude']].describe()
+idx = data[data['Longitude'] > -116].index
+data.loc[idx, 'Longitude'] -= 100
+data.drop("Unnamed: 0", axis=1, inplace=True)
+data.to_csv(filename, index=False)
+'''
 data.head()
-data.drop('Unnamed: 0', axis=1, inplace=True)
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 nullIds = data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index
 data.drop(nullIds, inplace = True)
 data.reset_index(drop=True, inplace=True)
-data['SampleDate'] = pd.to_datetime(data['SampleDate'], format="%m/%d/%Y").dt.strftime('%Y-%m-%d')
-
+data['SampleDate'] = [pd.to_datetime(x).strftime("%Y-%m-%d") for x in data['SampleDate']]
+data.head()
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
 ee.Initialize()
@@ -151,7 +159,7 @@ for idx in range(data.shape[0]):
     time_diff.append(t_diff)
     min_temp.append(tmin)
     max_temp.append(tmax)
-    et.append(aet)
+    et.append(0.1*aet)
 
     if idx%100 == 0: print(idx, end=' ')
 

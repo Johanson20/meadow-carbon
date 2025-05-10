@@ -85,6 +85,7 @@ def processGeotiff(df):
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
+    df['AET'] *= 0.1
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies in NAs for landsat and gridmet
     NA_Ids = df['Minimum_temperature'].isna()
