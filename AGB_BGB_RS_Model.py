@@ -201,8 +201,7 @@ for idx in range(data.shape[0]):
     if mycrs == "EPSG:32611":
         tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         daymet = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
-        max_tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").max()
-        min_tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").min()
+        tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -217,8 +216,7 @@ for idx in range(data.shape[0]):
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         daymet = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
-        max_tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").max()
-        min_tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").min()
+        tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
         flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -236,9 +234,8 @@ for idx in range(data.shape[0]):
     mean_pr = tclimate['pr']
     cdef_value = 0.1*tclimate['def']
     aet = 0.1*tclimate['aet']
-    temps = min_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    temps = tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmin = temps['tmmn']
-    temps = max_tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     tmax = temps['tmmx']
     
     NDWI_Summer.append(bands_June['NDWI'])
@@ -374,7 +371,8 @@ data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[21:])   # for the 5-year averaged data
+var_col = list(cols[10:-6]) + list(cols[-4:])   # for the 5-year averaged data
+var_col = [c for c in var_col if c not in ['Lithology', 'dEVI', 'SAVI_Sept', 'Wet_days', 'dNDWI', 'NDWI_Sept', 'Shallow_Clay', 'Deep_Clay', 'SAVI_June', 'dRed', 'dNDSI', 'EVI_Sept', 'dSWIR_2', 'dBSI', 'EVI_June', 'Elevation']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -425,9 +423,7 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.07, alpha=0.8413, max_depth=3, 
-                                      n_estimators=200, subsample=0.3, validation_fraction=0.2, n_iter_no_change=50,  
-                                      max_features='log2', random_state=10)
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, random_state=10)
 
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
@@ -509,7 +505,8 @@ plotY()
 
 
 # same procedure as above
-data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
+data = pd.read_csv("csv/Aboveground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+# data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns
@@ -519,7 +516,8 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[18:24]) + list(cols[-13:])
+var_col =  [c for c in cols[18:-8] if c not in ['Elevation', 'Flow']]  # for the 5-year averaged data
+# var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -553,10 +551,10 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=5, n_estimators=25, subsample=0.8, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=5, n_estimators=25, subsample=0.9, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.1, alpha=0.8413, max_depth=5, 
-                                      n_estimators=25, subsample=0.8, validation_fraction=0.2, n_iter_no_change=50,  
+                                      n_estimators=25, subsample=0.9, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
@@ -624,12 +622,10 @@ plotFeatureImportance()
 plotY()
 
 
-f = open('csv/models.pckl', 'wb')
-pickle.dump([ghg_model, agb_model, bgb_model], f)
-f.close()
-f = open('csv/sd_models.pckl', 'wb')
-pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
-f.close()
+with open('csv/models.pckl', 'wb') as f:
+    pickle.dump([ghg_model, agb_model, bgb_model], f)
+with open('csv/sd_models.pckl', 'wb') as f:
+    pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
 
 
 '''

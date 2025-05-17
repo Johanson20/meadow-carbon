@@ -187,13 +187,13 @@ data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Blue']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Blue'])
 data['NDPI'] = (data['NIR'] - (0.56*data['Red'] + 0.44*data['SWIR_2']))/(data['NIR'] + 0.56*data['Red'] + 0.44*data['SWIR_2'])
 
-# display first 5 rows of updated dataframe
-data.reset_index(drop=True, inplace=True)
-data.head()
-
 # checks how many pixels are cloud free (non-null value);
 # all bands would be simultaneously cloud-free or not
 len([x for x in Blue if x])
+
+# display first 5 rows of updated dataframe
+data.reset_index(drop=True, inplace=True)
+data.head()
 
 # write updated dataframe to new csv file
 data.to_csv('csv/GHG_Flux_RS_Model_Data.csv', index=False)
@@ -277,10 +277,10 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=6, n_estimators=750, subsample=0.6, validation_fraction=0.2,
+ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=11, n_estimators=500, subsample=1.0, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-ghg_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.03, alpha=0.8413, max_depth=6, 
-                                      n_estimators=750, subsample=0.6, validation_fraction=0.2, n_iter_no_change=50,  
+ghg_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.03, alpha=0.8413, max_depth=11, 
+                                      n_estimators=500, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)
