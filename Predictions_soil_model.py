@@ -58,14 +58,14 @@ def geotiffToCsv(input_raster, bandnames):
     nrows = df.shape[0]
 
     out_csv = pd.DataFrame()
-    allBands = set(df.columns)
+    colBands = set(df.columns)
     nBands = len(bandnames)
     
-    # There are 11 repeating bands
-    for col in range(1, 12):
+    # There are 12 repeating bands
+    for col in range(1, (recurringBands + 1)):
         values = []
-        for band in [col] + list(range(19+col, nBands+1, 11)):
-            if band in allBands:
+        for band in [col] + list(range(allBands+col, nBands+1, recurringBands)):
+            if band in colBands:
                 values = values + list(df[band])
             else:
                 values = values + [np.nan]*nrows
@@ -73,7 +73,7 @@ def geotiffToCsv(input_raster, bandnames):
     
     # repeat the other columns throughout length of dataframe
     n = int(out_csv.shape[0]/nrows)
-    for col in range(12, 20):
+    for col in range((recurringBands + 1), (allBands + 1)):
         out_csv[bandnames[col-1]] = list(df[col])*n
     out_csv['x'] = list(df['x'])*n
     out_csv['y'] = list(df['y'])*n
@@ -82,10 +82,10 @@ def geotiffToCsv(input_raster, bandnames):
 
 def processGeotiff(df):
     # drop null columns and convert infinity to NAs
-    nullIds = list(np.where(df['tmmx'].isnull())[0])
+    nullIds = list(np.where(df['Maximum_temperature'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
-    df['AET'] *= 0.1
+    df[['AET', 'Cdef']] *= 0.1
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies in NAs for landsat and gridmet
     NA_Ids = df['Minimum_temperature'].isna()
@@ -137,6 +137,7 @@ def interpolate_group(group):
     group.loc[:, interp_cols] = group.loc[:, interp_cols].interpolate(method='time').ffill().bfill()
     group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
     group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
+    group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
     
     # non-snow covered days
     integrals = group[group.NDSI <= 0.2]
@@ -157,7 +158,7 @@ def interpolate_group(group):
     group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
     group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
     group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
-    group.drop((cols[:6] + cols[7:9] + ['AET'] + cols[-7:] + ['Month', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
+    group.drop((cols[:6] + cols[-7:] + ['Month', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
     return group.head(1)
 
 
@@ -235,7 +236,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         deep_hydra = deep_hydra_cond.clip(shapefile_bbox)
         shall_org = shallow_organic_m.clip(shapefile_bbox)
     combined_image, residue_image = None, None
-    noBands, bandnames1 = 19, 0
+    noBands, bandnames1, threshold = allBands, 0, np.ceil((1024 - allBands)/recurringBands)
     noImages = len(dates)
     
     # iterate through each landsat image and align data types (float32)
@@ -258,15 +259,15 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         # align other satellite data with landsat and make resolution (30m)
         if idx == 0:     # extract constant values once for the same meadow
             combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
-            if noImages > 92:   # split image when bands would exceed 1024
-                bandnames1 = 19
+            if noImages > threshold:   # split image when bands would exceed 1024
+                bandnames1 = allBands
                 residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_hydra, deep_hydra, shall_org])
         else:
-            if noBands < 1013:
-                noBands += 11     # 11 total of recurring bands
+            if noBands < (1024 - recurringBands):
+                noBands += recurringBands     # 12 total of recurring bands
                 combined_image = combined_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
             else:
-                bandnames1 += 11
+                bandnames1 += recurringBands
                 residue_image = residue_image.addBands([landsat_image, date_band, gridmet_30m, tclimate_30m])
         if residue_image:
             residue_image = residue_image.toFloat()
@@ -385,12 +386,13 @@ deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['def', 'pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Cdef', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('20/01/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('20/05/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -437,7 +439,7 @@ def prepareMeadows(meadowIdx):
                         time.sleep(1.1)
                         with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                             geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                    if bandnames1 > 19 and os.path.exists(image_name):
+                    if bandnames1 > allBands and os.path.exists(image_name):
                         extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
                         geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
                         if not os.path.exists(extra_image_name):
@@ -445,7 +447,7 @@ def prepareMeadows(meadowIdx):
                             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                                 geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
             if not os.path.exists(image_name):    # merge both images for g-drive download
-                if bandnames1 > 19 and residue_image is not None:
+                if bandnames1 > allBands and residue_image is not None:
                     total_image = combined_image.addBands(residue_image)
                 else:
                     total_image = combined_image
@@ -462,7 +464,7 @@ def prepareMeadows(meadowIdx):
 def processMeadow(meadowCues):
     try:
         meadowIdx, totalBands = meadowCues
-        if totalBands <= 19:
+        if totalBands <= allBands:
             return -1   # if no GEE data is available for the meadow's buffer
         feature = shapefile.loc[meadowIdx, :]
         meadowId, mycrs = int(feature.ID), feature.crs
@@ -470,10 +472,10 @@ def processMeadow(meadowCues):
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
         df = pd.DataFrame()
-        noBands = 1020 if totalBands > 1024 else totalBands
+        noBands = (1024 - recurringBands) if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
-        bandnames = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'tmmn', 'tmmx', 'pr', 'AET', 'b1', 'slope', 'swe', 'shall_clay', 'deep_clay', 'shall_hydra', 'deep_hydra', 'shall_org']
+        bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = splitMeadowBounds(feature, False)
     
@@ -486,16 +488,16 @@ def processMeadow(meadowCues):
                 image_names.add(extra_image_name[17:-4])
         
         if totalBands < 1024:
-            while totalBands > 19:
-                bandnames = bandnames.copy() + bandnames[:11]
-                totalBands -= 11
+            while totalBands > allBands:
+                bandnames = bandnames.copy() + bandnames[:recurringBands]
+                totalBands -= recurringBands
         else:
-            while noBands > 19:
-                bandnames = bandnames.copy() + bandnames[:11]
-                noBands -= 11
-            while noBands1 > 19:
-                bandnames1 = bandnames1.copy() + bandnames1[:11]
-                noBands1 -= 11
+            while noBands > allBands:
+                bandnames = bandnames.copy() + bandnames[:recurringBands]
+                noBands -= recurringBands
+            while noBands1 > allBands:
+                bandnames1 = bandnames1.copy() + bandnames1[:recurringBands]
+                noBands1 -= recurringBands
         
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
