@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore")
 
 
 def calculateIndices(image):
-    # rename bands and  normalize raw reflectance values
+    # normalize raw reflectance values and calculate indices
     scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
     # add indices
@@ -58,7 +58,7 @@ def calculateIndices(image):
 
 
 def maskCloud(image):
-    # mask out cloud based on bits in QA_pixel
+    # rename bands and mask out cloud based on bits in QA_pixel
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -181,7 +181,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year, month, day = target_date.split("-")
-    next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
+    # next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
     
     landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, year+"-10-01")
@@ -367,12 +367,10 @@ data.head()
 cols = data.columns
 data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
-data.reset_index(drop=True, inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[10:-6]) + list(cols[-4:])   # for the 5-year averaged data
-var_col = [c for c in var_col if c not in ['Lithology', 'dEVI', 'SAVI_Sept', 'Wet_days', 'dNDWI', 'NDWI_Sept', 'Shallow_Clay', 'Deep_Clay', 'SAVI_June', 'dRed', 'dNDSI', 'EVI_Sept', 'dSWIR_2', 'dBSI', 'EVI_June', 'Elevation']]
+var_col = [c for c in (list(cols[10:-6]) + list(cols[-4:])) if c not in ['dNDSI', 'Flow', 'Lithology', 'dNDWI', 'Wet_days', 'SAVI_Sept', 'Deep_Hydra_Conduc', 'Deep_Clay', 'EVI_June', 'Shallow_Clay', 'NDWI_Sept', 'Shallow_Hydra_Conduc', 'EVI_Sept', 'dEVI']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -475,33 +473,53 @@ print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %"
 feat_imp = bgb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
-# Make regression line over y_test and it's predictions
-regressor = LinearRegression()
-y_test = np.array(y_test).reshape(-1,1)
-y_test_pred = np.array(y_test_pred).reshape(-1,1)
-regressor.fit(y_test, y_test_pred)
-y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 
-def plotY():
-    plt.scatter(y_test, y_test_pred, color='g')
-    plt.plot(y_test, y_pred, color='k', label='Regression line')
-    plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
+def plotTestY():
+    # Make regression line over y_test and it's predictions
+    regressor = LinearRegression()
+    test_y = np.array(y_test).reshape(-1,1)
+    test_pred_y = np.array(y_test_pred).reshape(-1,1)
+    regressor.fit(test_y, test_pred_y)
+    y_pred = regressor.predict(test_y)
+    plt.scatter(test_y, y_test_pred, color='g')
+    plt.plot(test_y, y_pred, color='k', label='Regression line')
+    plt.plot(test_y, test_y, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
     plt.title("Test set (y_test)")
     # Make axes of equal extents
-    axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
+    axes_lim = np.ceil(max(max(test_y), max(test_pred_y))) + 2
+    plt.xlim((0, axes_lim))
+    plt.ylim((0, axes_lim))
+    plt.legend()
+
+def plotTrainY():
+    # Make regression line over y_train and it's predictions
+    regressor = LinearRegression()
+    train_y = np.array(y_train).reshape(-1,1)
+    train_pred_y = np.array(y_train_pred).reshape(-1,1)
+    regressor.fit(train_y, train_pred_y)
+    y_pred = regressor.predict(train_y)
+    plt.scatter(train_y, train_pred_y, color='g')
+    plt.plot(train_y, y_pred, color='k', label='Regression line')
+    plt.plot(train_y, train_y, linestyle='dotted', color='gray', label='1:1 line')
+    plt.xlabel('Actual ' + y_field)
+    plt.ylabel("Predicted " + y_field)
+    plt.title("Training set (y_train)")
+    # Make axes of equal extents
+    axes_lim = np.ceil(max(max(train_y), max(train_pred_y))) + 2
     plt.xlim((0, axes_lim))
     plt.ylim((0, axes_lim))
     plt.legend()
 
 plotFeatureImportance()
-plotY()
+plotTestY()
+plotTrainY()
 
 
 # same procedure as above
@@ -516,7 +534,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in cols[18:-8] if c not in ['Elevation', 'Flow']]  # for the 5-year averaged data
+var_col =  [c for c in cols[18:-8] if c not in ['dNDSI', 'SWE', 'Wet_days', 'Flow']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -551,10 +569,10 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=5, n_estimators=25, subsample=0.9, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=6, n_estimators=25, subsample=1.0, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.1, alpha=0.8413, max_depth=5, 
-                                      n_estimators=25, subsample=0.9, validation_fraction=0.2, n_iter_no_change=50,  
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.25, alpha=0.8413, max_depth=6, 
+                                      n_estimators=25, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
@@ -606,12 +624,6 @@ print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %"
 feat_imp = agb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
-# Make regression line over y_test and it's predictions
-regressor = LinearRegression()
-y_test = np.array(y_test).reshape(-1,1)
-y_test_pred = np.array(y_test_pred).reshape(-1,1)
-regressor.fit(y_test, y_test_pred)
-y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
@@ -619,22 +631,11 @@ def plotFeatureImportance():
     plt.title("Feature Importance")
 
 plotFeatureImportance()
-plotY()
+plotTestY()
+plotTrainY()
 
 
-with open('csv/models.pckl', 'wb') as f:
+with open('csv/soil_models.pckl', 'wb') as f:   # also models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
 with open('csv/sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
-
-
-'''
-# GHG Results:
-{'RMSE': [1.38516, 0.03, 250, 0.8, 11, 0.2]}
-
-# BGB Results:
-{'RMSE': [1.37666, 0.16, 50, 0.9, 12, 0.2]}
-
-# AGB Results: 
-{'RMSE': [109.28577, 0.33, 75, 0.9, 18, 0.2]}
-'''
