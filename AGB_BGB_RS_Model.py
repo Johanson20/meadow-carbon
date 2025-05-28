@@ -370,7 +370,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in (list(cols[10:-6]) + list(cols[-4:])) if c not in ['dNDSI', 'Flow', 'Lithology', 'dNDWI', 'Wet_days', 'SAVI_Sept', 'Deep_Hydra_Conduc', 'Deep_Clay', 'EVI_June', 'Shallow_Clay', 'NDWI_Sept', 'Shallow_Hydra_Conduc', 'EVI_Sept', 'dEVI']]
+var_col = [c for c in (list(cols[10:-6]) + list(cols[-4:])) if c not in ['dNDSI', 'Flow', 'Cdef', 'Lithology', 'SAVI_Sept', 'NDWI_Sept', 'Shallow_Clay', 'dNDWI', 'Deep_Clay', 'Wet_days', 'dEVI', 'Deep_Hydra_Conduc', 'dSWIR_2', 'dBSI', 'EVI_June']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -451,17 +451,17 @@ y_test_pred = bgb_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
 train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)*100
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
-test_p_bias = sum(val[np.isfinite(val)]) * 100
+test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
 print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
@@ -534,7 +534,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in cols[18:-8] if c not in ['dNDSI', 'SWE', 'Wet_days', 'Flow']]  # for the 5-year averaged data
+var_col =  [c for c in cols[18:-8] if c not in ['dNDSI', 'Cdef', 'SWE', 'Wet_days', 'Flow']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -569,10 +569,10 @@ test_data = data.iloc[test_index]
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=6, n_estimators=25, subsample=1.0, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=4, n_estimators=50, subsample=0.9, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.25, alpha=0.8413, max_depth=6, 
-                                      n_estimators=25, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.13, alpha=0.8413, max_depth=4, 
+                                      n_estimators=50, subsample=0.9, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
@@ -602,14 +602,14 @@ y_test_pred = agb_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
 train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)*100
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100

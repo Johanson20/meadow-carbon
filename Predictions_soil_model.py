@@ -85,7 +85,7 @@ def processGeotiff(df):
     nullIds = list(np.where(df['Maximum_temperature'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
-    df[['AET', 'Cdef']] *= 0.1
+    df['AET'] *= 0.1
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies in NAs for landsat and gridmet
     NA_Ids = df['Minimum_temperature'].isna()
@@ -234,25 +234,25 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         elev_30m = dem_11.clip(shapefile_bbox)
         slope_30m = slope_11.clip(shapefile_bbox)
         swe_30m = daymet_11.clip(shapefile_bbox)
-        '''shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
-        deep_clay = deep_perc_clay_11.clip(shapefile_bbox)
+        # shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
+        # deep_clay = deep_perc_clay_11.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox)
-        deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox)'''
+        # deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox)
         shall_org = shallow_organic_m_11.clip(shapefile_bbox)
     else:
         flow_30m = flow_acc_10.clip(shapefile_bbox)
         elev_30m = dem_10.clip(shapefile_bbox)
         slope_30m = slope_10.clip(shapefile_bbox)
         swe_30m = daymet_10.clip(shapefile_bbox)
-        '''shall_clay = shallow_perc_clay.clip(shapefile_bbox)
-        deep_clay = deep_perc_clay.clip(shapefile_bbox)
+        # shall_clay = shallow_perc_clay.clip(shapefile_bbox)
+        # deep_clay = deep_perc_clay.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond.clip(shapefile_bbox)
-        deep_hydra = deep_hydra_cond.clip(shapefile_bbox)'''
+        # deep_hydra = deep_hydra_cond.clip(shapefile_bbox)
         shall_org = shallow_organic_m.clip(shapefile_bbox)
     # filter for summer and fall and calculate indices
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
     landsat_June = landsat_5_year.select(['NDWI', 'SAVI', 'BSI', 'NDPI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
-    landsat_Sept = landsat_5_year.select(['BSI', 'NDPI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
+    landsat_Sept = landsat_5_year.select(['BSI', 'EVI', 'NDPI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
     combined_image, residue_image = None, None
     noBands, bandnames1, threshold = allBands, 0, np.ceil((1024 - allBands)/recurringBands)
     noImages = len(dates)
@@ -276,10 +276,10 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         
         # align other satellite data with landsat and make resolution (30m)
         if idx == 0:     # extract constant values once for the same meadow
-            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, elev_30m, slope_30m, swe_30m, shall_org, landsat_June, landsat_Sept])
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, elev_30m, slope_30m, swe_30m, shall_org, shall_hydra, landsat_June, landsat_Sept])
             if noImages > threshold:   # split image when bands would exceed 1024
                 bandnames1 = allBands
-                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_org, landsat_June, landsat_Sept])
+                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, flow_30m, slope_30m, swe_30m, shall_org, shall_hydra, landsat_June, landsat_Sept])
         else:
             if noBands < (1024 - recurringBands):
                 noBands += recurringBands     # 12 total of recurring bands
@@ -405,10 +405,10 @@ deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
-terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['def', 'pr', 'aet'])
+terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Cdef', 'Annual_Precipitation', 'AET', 'Flow', 'Elevation', 'Slope', 'SWE', 'Organic_Matter', 'NDWI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
-recurringBands, allBands = len(cols[:12]), len(cols[:-9])
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Elevation', 'Slope', 'SWE', 'Organic_Matter', 'Shallow_Hydra_Conduc', 'NDWI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'BSI_Sept', 'EVI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+recurringBands, allBands = len(cols[:11]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
 current_time = datetime.strptime('20/05/2025', '%d/%m/%Y').timestamp()*1000

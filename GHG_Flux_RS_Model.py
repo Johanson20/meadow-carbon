@@ -310,14 +310,14 @@ y_test_pred = ghg_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
 train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)*100
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100
