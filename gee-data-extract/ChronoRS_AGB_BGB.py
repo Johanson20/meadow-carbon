@@ -10,7 +10,7 @@ import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("csv/ChronoRS_AGB.csv")
+data = pd.read_csv("../csv/ChronoRS_AGB.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -59,11 +59,11 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/ChronoRS_AGB_NIR.csv', index=False)
+data.to_csv('../csv/ChronoRS_AGB_NIR.csv', index=False)
 
 
 # REPEAT same for BGB
-data = pd.read_csv("csv/ChronoRS_BGB.csv")
+data = pd.read_csv("../csv/ChronoRS_BGB.csv")
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format = '%m/%d/%y')
 data.head()
 
@@ -99,4 +99,4 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/ChronoRS_BGB_NIR.csv', index=False)
+data.to_csv('../csv/ChronoRS_BGB_NIR.csv', index=False)

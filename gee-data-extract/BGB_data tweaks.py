@@ -22,7 +22,7 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
@@ -153,7 +153,7 @@ data['L2_Organic_Matter'] = L2_Org
 data['L3_Organic_Matter'] = L3_Org
 data['L4_Organic_Matter'] = L4_Org
 
-data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)
+data.to_csv("../files/Belowground Biomass_RS Model_Data.csv", index=False)
 
 
 # Another extraction (depth classes of polaris soil averaged)
@@ -222,4 +222,4 @@ data['Shallow_Hydra_Conduc'] = Shallow_Hydra
 data['Deep_Hydra_Conduc'] = Deep_Hydra
 data['Organic_Matter'] = Organic
 
-data.to_csv("files/Belowground Biomass_RS Model_Data1.csv", index=False)
+data.to_csv("../files/Belowground Biomass_RS Model_Data1.csv", index=False)

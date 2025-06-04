@@ -452,9 +452,9 @@ y_test_pred = bgb_model.predict(X_test)
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
+train_corr = np.corrcoef(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
@@ -491,7 +491,7 @@ def plotTestY():
     plt.plot(test_y, test_y, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test)")
+    plt.title(f"Test set (y_test); R = {np.round(test_corr[0][1], 4)}")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(test_y), max(test_pred_y))) + 2
     plt.xlim((0, axes_lim))
@@ -510,7 +510,7 @@ def plotTrainY():
     plt.plot(train_y, train_y, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Training set (y_train)")
+    plt.title(f"Training set (y_train); R = {np.round(train_corr[0][1], 4)}")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(train_y), max(train_pred_y))) + 2
     plt.xlim((0, axes_lim))
@@ -603,9 +603,9 @@ y_test_pred = agb_model.predict(X_test)
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
+train_corr = np.corrcoef(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
@@ -635,7 +635,7 @@ plotTestY()
 plotTrainY()
 
 
-with open('csv/soil_models.pckl', 'wb') as f:   # also models.pckl
+with open('csv/soil_models.pckl', 'wb') as f:   # there is also models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
 with open('csv/sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)

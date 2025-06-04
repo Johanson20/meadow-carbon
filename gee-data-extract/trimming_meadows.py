@@ -12,7 +12,7 @@ os.chdir("Code")
 # ee.Authenticate()
 ee.Initialize()
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp")
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp")
 
 feature = shapefile.iloc[4].geometry
 list(shapefile.columns)
@@ -53,4 +53,4 @@ for index, row in shapefile.iterrows():
     if index%100==0: print(index, end=" ")
     
 shapefile = None
-out_df.to_csv('csv/False_meadows_2022.csv', index=False)
+out_df.to_csv('../csv/False_meadows_2022.csv', index=False)

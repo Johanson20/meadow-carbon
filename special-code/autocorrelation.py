@@ -11,7 +11,7 @@ import pandas as pd
 from skgstat import Variogram
 from pyproj import Transformer
 
-data = pd.read_csv("csv/Aboveground Biomass_RS Model.csv")
+data = pd.read_csv("../csv/Aboveground Biomass_RS Model.csv")
 data.head()
 data.columns
 
@@ -30,4 +30,4 @@ vg.describe()
 
 data['x'] = x
 data['y'] = y
-data.to_csv('csv/data.csv', index=False)
+data.to_csv('../csv/data.csv', index=False)

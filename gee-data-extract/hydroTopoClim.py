@@ -14,7 +14,7 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("csv/meadow.csv")
+data = pd.read_csv("../csv/meadow.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -112,4 +112,4 @@ ids = [x for x in Blue if x]
 len(ids)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/meadow_Data.csv', index=False)
+data.to_csv('../csv/meadow_Data.csv', index=False)

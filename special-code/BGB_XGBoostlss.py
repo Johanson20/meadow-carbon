@@ -11,7 +11,7 @@ from sklearn.model_selection import GroupShuffleSplit
 import pandas as pd
 import numpy as np
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns

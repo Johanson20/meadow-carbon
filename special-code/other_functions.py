@@ -144,12 +144,12 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
 shapefile['crs'] = "EPSG:32611"
-utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+utm_zone10 = gpd.read_file("../files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
 allIdx = None
@@ -191,6 +191,6 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     out_grd = out_grd.rio.reproject(epsg_crs)
     out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "_NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)
+# mergeToSingleGeotiff("../files/2023", "../files/merged_ANPP.tif", ".csv", "ANPP",)
+# mergeToSingleGeotiff("../files/2016NEP", "../files/NEP_2016_Zone10.tif", "_NEP.tif")
+# mergeToSingleGeotiff("../files/2016NEP", "../files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)

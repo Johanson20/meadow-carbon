@@ -311,9 +311,9 @@ y_test_pred = ghg_model.predict(X_test)
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
 train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
+train_corr = np.corrcoef(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
@@ -350,7 +350,7 @@ def plotY():
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test)")
+    plt.title(f"Test set (y_test); R = {np.round(test_corr[0][1], 4)}")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
