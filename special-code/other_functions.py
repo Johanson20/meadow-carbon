@@ -18,6 +18,8 @@ from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 from geocube.api.core import make_geocube
 
+os.chdir("Code")    # change path to where github code is pulled from
+
 
 def GeotiffFromGEEImage(GEE_image, bounding_box, geotiffname, bandnames, epsg, res=30):
     '''
@@ -69,7 +71,7 @@ def downloadBands(banded_image, image_name, region, mycrs, scale=30):
 # downloadBands(combined_image, "meadow_2021_16696_4614_0.tif", shapefile_bbox, "EPSG:32610")
 
 
-def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4269):
+def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4326):
     '''
     Convert geotiff to raster and make coordinates in latlon from projected, supply epsg code of projection
     '''
@@ -98,11 +100,11 @@ def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4269):
     out_csv['x'] = x_geo
     out_csv['y'] = y_geo
     
-    # from raster projection to 4269
+    # from raster projection to WGS84
     mycrs = osr.SpatialReference()
     mycrs.ImportFromProj4(geotiff.GetProjection())
     target_crs = osr.SpatialReference()
-    target_crs.ImportFromEPSG(epsg)  # WGS84
+    target_crs.ImportFromEPSG(epsg)
     transform = osr.CoordinateTransformation(mycrs, target_crs)
     points = [(x, y) for x, y in zip(x_geo, y_geo)]
     coords = transform.TransformPoints(points)
@@ -144,24 +146,28 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
+# identify each meadow as UTM Zone 10 or 11
 shapefile['crs'] = "EPSG:32611"
-utm_zone10 = gpd.read_file("../files/CA_UTM10.shp").to_crs(epsg_crs)
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
 allIdx = None
 
 
 def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, res=30):
+    '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
     all_files = [os.path.join(inputdir, f) for f in os.listdir(inputdir) if f.endswith(endname)]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
+    # extract indexes of the meadows of a distinct UTM zone
     shps_to_use = shapefile[shapefile['crs'] == "EPSG:" + str(zone)].index
     
     if endname.endswith(".tif"):
         for file in all_files:
+            # distinguish between SD meadows and others
             if file.endswith("1SD" + endname):
                 continue
             if int(file.split("_")[-2]) not in shps_to_use:
@@ -182,6 +188,7 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     else:
         return
     
+    # create a geodataframe and then raster for the single column of interest (variable) as the pixel value
     all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
     utm_lons, utm_lats = all_data['X'], all_data['Y']
     pixel_values = all_data[variable]
@@ -191,6 +198,6 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     out_grd = out_grd.rio.reproject(epsg_crs)
     out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("../files/2023", "../files/merged_ANPP.tif", ".csv", "ANPP",)
-# mergeToSingleGeotiff("../files/2016NEP", "../files/NEP_2016_Zone10.tif", "_NEP.tif")
-# mergeToSingleGeotiff("../files/2016NEP", "../files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)
+# mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "_NEP.tif")
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)

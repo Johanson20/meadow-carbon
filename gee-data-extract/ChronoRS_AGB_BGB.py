@@ -10,7 +10,7 @@ import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("../csv/ChronoRS_AGB.csv")
+data = pd.read_csv("csv/ChronoRS_AGB.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -24,7 +24,7 @@ def addB5(image):
     return image.set('B5_value', image.select('B5').reduceRegion(ee.Reducer.mean(), point, 30).get('B5'))
 
 
-# extract unique years and create a dictionary of landsat data for each year
+# extract unique sample years and create a dictionary of landsat data for each year
 years = set(x.split("/")[2] for x in data.loc[:, 'SampleDate'])
 landsat = {}
 for year in years:
@@ -59,14 +59,15 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('../csv/ChronoRS_AGB_NIR.csv', index=False)
+data.to_csv('csv/ChronoRS_AGB_NIR.csv', index=False)
 
 
-# REPEAT same for BGB
-data = pd.read_csv("../csv/ChronoRS_BGB.csv")
+# Repeating above steps for BGB
+data = pd.read_csv("csv/ChronoRS_BGB.csv")
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format = '%m/%d/%y')
 data.head()
 
+# extract landsat8 year collections for each unique sample year
 years = set(x.split("/")[2] for x in data.loc[:, 'SampleDate'].strftime('%Y'))
 landsat = {}
 for year in years:
@@ -99,4 +100,4 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('../csv/ChronoRS_BGB_NIR.csv', index=False)
+data.to_csv('csv/ChronoRS_BGB_NIR.csv', index=False)

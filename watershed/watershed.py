@@ -24,9 +24,9 @@ def map_to_pixels(x, y, grid_bounds, cellsize):
 
 # read in shapefile, the hydroshed DEM and adjust flats and depressions
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
-grid = Grid.from_raster('../files/sierra_nevada_merged.tif')
-dem = grid.read_raster('../files/sierra_nevada_merged.tif')
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+grid = Grid.from_raster('files/sierra_nevada_merged.tif')
+dem = grid.read_raster('files/sierra_nevada_merged.tif')
 flooded_dem = grid.fill_depressions(dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
@@ -57,11 +57,11 @@ def watershedValues(meadowIdx):
     boundary_coords = np.array(boundary.coords)
     min_x, min_y, max_x, max_y = meadow_bounds
     
-    try:
+    try:    # convert geographic coordinates to projected
         min_row, max_col = ~transform * (min_x, min_y)  # Upper-left corner
         max_row, min_col = ~transform * (max_x, max_y)  # Bottom-right corner
         
-        # Convert to integer indices
+        # Convert projected coordinates to row/column indexes of raster
         min_row, max_col = int(np.floor(min_row)), int(np.ceil(max_col))
         max_row, min_col = int(np.ceil(max_row)), int(np.floor(min_col))
         
@@ -115,7 +115,7 @@ def watershedValues(meadowIdx):
         ws_mask = ws_mask.astype('int32')
         watershed = list(grid.polygonize(ws_mask))
         for geom, value in watershed:
-            if geom['type'] == 'Polygon' and value == 1:
+            if geom['type'] == 'Polygon' and value == 1:    # ensure it's a valid polygon
                 watershed_polygons.append(Polygon(geom['coordinates'][0]))
                 meadowIds.append(meadowId)
                 x_pour_points.append(x_pour_point)
@@ -136,12 +136,12 @@ for meadowIdx in shapefile.index:
     watersheds.loc[meadowIdx, :] = watershedValues(meadowIdx)
 
 # write values to csv and delineated watersheds to a shapefile
-watersheds.to_csv("../csv/watersheds.csv", index=False)
+watersheds.to_csv("csv/watersheds.csv", index=False)
 watersheds_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'meadow_Id': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'uplandArea': upland_areas, 'avg_slope': average_slopes}, geometry = 'geometry', crs=shapefile.crs)
 points_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'ID': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'Area_km2': meadow_Areas, "Max_Flow_Acc": acc_val, "Value_Type": value_type}, geometry = 'geometry', crs=shapefile.crs)
 # Save watersheds to a new shapefile
-watersheds_gdf.to_file("../files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
-points_gdf.to_file("../files/Pour_points.shp", driver="ESRI Shapefile")
+watersheds_gdf.to_file("files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
+points_gdf.to_file("files/Pour_points.shp", driver="ESRI Shapefile")
 
 # upland_area * 90**2     # Probable area in square meters
 # slope_at_pour/(90**2)   # Probable slope in degrees

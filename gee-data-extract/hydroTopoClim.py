@@ -14,7 +14,7 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("../csv/meadow.csv")
+data = pd.read_csv("csv/meadow.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -84,6 +84,7 @@ for idx in range(data.shape[0]):
     
     if idx%50 == 0: print(idx, end=' ')
 
+# append data values: rescale bands and calculate indices
 data['Blue'] = [(x*2.75e-05 - 0.2) for x in Blue]
 data['Green'] = [(x*2.75e-05 - 0.2) for x in Green]
 data['Red'] = [(x*2.75e-05 - 0.2) for x in Red]
@@ -112,4 +113,4 @@ ids = [x for x in Blue if x]
 len(ids)
 
 # write updated dataframe to new csv file
-data.to_csv('../csv/meadow_Data.csv', index=False)
+data.to_csv('csv/meadow_Data.csv', index=False)

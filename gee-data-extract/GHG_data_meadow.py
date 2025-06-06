@@ -10,7 +10,7 @@ import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("../csv/GHG_Data_Sample.csv")
+data = pd.read_csv("csv/GHG_Data_Sample.csv")
 data['Date'] = pd.to_datetime(data['Date'], format = '%m/%d/%y')
 data.head()
 
@@ -129,10 +129,10 @@ data.head(10)
 ids = [x for x in Blue if x]
 
 # write updated dataframe to new csv file
-data.to_csv('../csv/GHG_Data_Sample_Bands.csv', index=False)
+data.to_csv('csv/GHG_Data_Sample_Bands.csv', index=False)
 
 
-data = pd.read_csv("../csv/GHG_Data_Sample_Bands.csv")
+data = pd.read_csv("csv/GHG_Data_Sample_Bands.csv")
 data.head()
 
 min_temp, max_temp = [], []
@@ -155,7 +155,7 @@ for id in range(data.shape[0]):
 data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 
-data.to_csv('../csv/GHG_Data_Sample_Bands_Temp.csv', index=False)
+data.to_csv('csv/GHG_Data_Sample_Bands_Temp.csv', index=False)
 
 '''
 # TESTING Landsat usage from google earth engine

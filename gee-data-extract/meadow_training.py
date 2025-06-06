@@ -14,7 +14,7 @@ os.chdir("Code")
 ee.Initialize()
 
 # read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("../files/AllPossibleMeadows_2024-02-12.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2024-04-01.shp")
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 
@@ -62,4 +62,4 @@ for index, row in shapefile.iterrows():
     if index%100==0: print(index, end=" ")
 
 shapefile = None
-df.to_csv('../csv/All_meadows_2022.csv', index=False)
+df.to_csv('csv/All_meadows_2022.csv', index=False)

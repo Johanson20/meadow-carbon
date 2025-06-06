@@ -23,10 +23,10 @@ os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 
 # Specify the folder containing raster files and open them as datasets
-raster_files = glob.glob("../files/usgs_10m*.tif")
+raster_files = glob.glob("files/usgs_10m*.tif")
 src_files_to_mosaic = [rasterio.open(fp) for fp in raster_files]
 # extract metadata from one of the source files
 out_meta = src_files_to_mosaic[0].meta.copy()
@@ -36,31 +36,31 @@ mosaic, out_trans = merge(src_files_to_mosaic, method='max')
 out_meta.update({"driver": "GTiff", "nodata": -9999, "height": mosaic.shape[1],
     "width": mosaic.shape[2], "transform": out_trans})
 # Save the output raster (optional)
-with rasterio.open("../files/sierra_nevada_10m.tif", "w", **out_meta) as dest:
+with rasterio.open("files/sierra_nevada_10m.tif", "w", **out_meta) as dest:
     dest.write(mosaic)
 del mosaic, src_files_to_mosaic, out_trans   # save space
 
 # extract geometry of meadow for clipping
 geoms = [geom.__geo_interface__ for geom in meadows.geometry]
-with rasterio.open("../files/sierra_nevada_10m.tif") as src:
+with rasterio.open("files/sierra_nevada_10m.tif") as src:
     clipped_image, clipped_transform = mask(src, geoms, crop=True)
 out_meta.update({"driver": "GTiff", "height": clipped_image.shape[1],
     "width": clipped_image.shape[2], "transform": clipped_transform})
 # Save the output raster (only if geoms was based on cascade meadows)
-with rasterio.open("../files/cascade_nevada_10m.tif", "w", **out_meta) as dest:
+with rasterio.open("files/cascade_nevada_10m.tif", "w", **out_meta) as dest:
     dest.write(clipped_image)
 del clipped_image    # save space
 
-grid = Grid.from_raster('../files/hydroDEM_merged.tif')
-dem = grid.read_raster('../files/hydroDEM_merged.tif')
+grid = Grid.from_raster('files/hydroDEM_merged.tif')
+dem = grid.read_raster('files/hydroDEM_merged.tif')
 pit_filled_dem = grid.fill_pits(dem)
 flooded_dem = grid.fill_depressions(pit_filled_dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
-fdir = Grid.from_raster('../files/FlowDirection.tif')
-fdir = fdir.read_raster('../files/FlowDirection.tif')
-acc = Grid.from_raster('../files/FlowDirection.tif')
-acc = acc.read_raster('../files/FlowAccumulation.tif')
+fdir = Grid.from_raster('files/FlowDirection.tif')
+fdir = fdir.read_raster('files/FlowDirection.tif')
+acc = Grid.from_raster('files/FlowDirection.tif')
+acc = acc.read_raster('files/FlowAccumulation.tif')
 transform = fdir.affine
 
 # compute flow direction and accumulation
@@ -72,9 +72,9 @@ out_meta.update(dtype=rasterio.float32, count=1, nodata=-9999, height=acc.shape[
 del pit_filled_dem, flooded_dem, inflated_dem
 
 # save rasters (optional)
-with rasterio.open("../files/FlowDirection.tif", "w", **out_meta) as dest:
+with rasterio.open("files/FlowDirection.tif", "w", **out_meta) as dest:
     dest.write(fdir, 1)
-with rasterio.open("../files/FlowDirection.tif", "w", **out_meta) as dest:
+with rasterio.open("files/FlowDirection.tif", "w", **out_meta) as dest:
     dest.write(acc, 1)
 
 # convert meadows to raster mask and apply to flow accumulation for each meadow
@@ -112,10 +112,10 @@ pts.head()
 del points, points_gdf, pts_joined
 
 # save the pour points
-pts.to_file("../files/sierra_pour_points.shp", driver="ESRI Shapefile")
+pts.to_file("files/sierra_pour_points.shp", driver="ESRI Shapefile")
 
 # read flowlines shapefile to snap pour points to closest flowline
-flowlines = gpd.read_file("../files/sierra_nevada_flowlines.shp")
+flowlines = gpd.read_file("files/sierra_nevada_flowlines.shp")
 ids_to_drop = []
 for idx in pts.ID:
     meadow = meadows[meadows.ID == idx].iloc[0]
@@ -142,9 +142,9 @@ snapped_meadows.reset_index(drop=True, inplace=True)
 pts2 = pts[pts['ID'].isin([int(x) for x in snapped_pts.ID])]
 pts2.reset_index(drop=True, inplace=True)
 # save the snapped pour points and meadows
-pts2.to_file("../files/sierra_sub_pour_points.shp", driver="ESRI Shapefile")
-snapped_pts.to_file("../files/snapped_sierra_pour_points.shp", driver="ESRI Shapefile")
-snapped_meadows.to_file("../files/snapped_sierra_meadows.shp", driver="ESRI Shapefile")
+pts2.to_file("files/sierra_sub_pour_points.shp", driver="ESRI Shapefile")
+snapped_pts.to_file("files/snapped_sierra_pour_points.shp", driver="ESRI Shapefile")
+snapped_meadows.to_file("files/snapped_sierra_meadows.shp", driver="ESRI Shapefile")
 
 # create watershed from pour point row-col coordinates and flow direction
 IDs, X_coords, Y_coords, Max_Flow_Acc = [], [], [], []
@@ -169,13 +169,13 @@ for idx in range(pts.shape[0]):
 
 # create the watersheds polygons file and save
 watershed_gdf = gpd.GeoDataFrame({'Meadow_ID': [IDs[i] for i in validPoly], 'MaxFlowAcc': [Max_Flow_Acc[i] for i in validPoly], 'X_Pour_Pt': [X_coords[i] for i in validPoly], 'Y_Pour_Pt': [Y_coords[i] for i in validPoly]}, geometry=water_poly, crs=epsg_crs)
-watershed_gdf.to_file("../files/sierra_watershed_polygons.shp", driver="ESRI Shapefile")
+watershed_gdf.to_file("files/sierra_watershed_polygons.shp", driver="ESRI Shapefile")
 
 # save the watershed raster
 watershed_raster = np.zeros_like(fdir)
 for ws in watersheds:
     watershed_raster[ws > 0] = ws[ws > 0]
-with rasterio.open("../files/watersheds.tif", "w", driver="GTiff", height=watershed_raster.shape[0], 
+with rasterio.open("files/watersheds.tif", "w", driver="GTiff", height=watershed_raster.shape[0], 
                    width=watershed_raster.shape[1], count=1, dtype=watershed_raster.dtype, 
                    crs=epsg_crs, transform=transform) as dst:
     dst.write(watershed_raster, 1)

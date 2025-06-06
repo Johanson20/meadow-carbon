@@ -87,7 +87,7 @@ def processGeotiff(df):
     df.columns = cols[:-7]
     df['AET'] *= 0.1
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    # landsat 7 scan lines leads to discrepancies in NAs for landsat and gridmet
+    # landsat 7 scan lines leads to discrepancies in blank/filled values between landsat and gridmet combined days
     NA_Ids = df['Minimum_temperature'].isna()
     df = df[~NA_Ids]    # drop NAs and interpolate remaining landsat NAs due to scan line issues
     df = df.groupby(['X', 'Y']).apply(interpolate_pixel_group)
@@ -312,7 +312,7 @@ def downloadFinishedTasks(image_names):
     return 0
 
 
-# resample and reproject when pixel size is greater than 30m
+# resample and reproject when image's pixel size is not 30m for both UTM zones
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -320,7 +320,7 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-#load ML GBM models
+#load ML GBM and SD models
 with open('csv/models.pckl', 'rb') as f:
     ghg_model, agb_model, bgb_model = pickle.load(f)
 with open('csv/sd_models.pckl', 'rb') as f:
@@ -344,6 +344,7 @@ minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
 sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
 
+# load all relevant GEE images/collections for both UTM Zones
 flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536)
@@ -362,7 +363,7 @@ daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).sel
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('24/02/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('24/05/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -544,8 +545,9 @@ noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
 if __name__ == "__main__":
-    years = range(1984, 2024)
-    for year in years[-6:-1]:
+    years = range(1984, 2025)
+    # run the first prepareMeadows for 5 years at a time (due to GEE limit) and display progress per year
+    for year in years[-6:-1]:   # modify the indexes
         start = datetime.now()
         loadYearCollection(year)
         with multiprocessing.Pool(processes=60) as pool:
@@ -554,10 +556,12 @@ if __name__ == "__main__":
             pickle.dump(bandresult, f)
         print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
     
+    # Refresh Google drive access and earth engine initialization; load all initiated tasks
     G_driveAccess()
     ee.Initialize()
     tasks = ee.batch.Task.list()
-    for year in years[-6:-1]:
+    # run the processMeadows for 5 years at a time
+    for year in years[-6:-1]:   # modify the indexes
         start = datetime.now()
         loadYearCollection(year)
         with open(f'files/{year}/bandresult.pckl', 'rb') as f:

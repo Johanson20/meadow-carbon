@@ -5,7 +5,6 @@ Created on Tue Apr 29 11:34:12 2025
 @author: jonyegbula
 """
 
-
 import geopandas as gpd
 import pandas as pd
 import os

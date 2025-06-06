@@ -15,6 +15,7 @@ os.chdir(mydir)
 filename = "csv/GHG Flux_RS Model.csv"
 data = pd.read_csv(filename)
 '''
+# fix coordinate values that are often mistyped
 data.columns
 data.loc[:, ['Longitude', 'Latitude']].describe()
 idx = data[data['Longitude'] > -116].index
@@ -47,13 +48,13 @@ def maskAndRename(image):
     return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
 
 
-# Calculates absolute time difference (in days) from a target date, in which the images are acquired
+# Calculates absolute time difference of a landsat image and a target date (in days)
 def calculate_time_difference(image):
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
 
 
-# Function to extract cloud free band values per pixel from landsat 8 or landsat 7
+# Function to extract cloud free band values per pixel from landsat
 def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
     # filter landsat images by location and dates about 60 day radius and sort by proximity to sample date
     spatial_filtered = landsat_collection.filterBounds(point)
@@ -62,12 +63,13 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
     sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
     noImages = sorted_collection.size().getInfo()
     
+    # check if there is at least one valid image; if so, combine to an image list
     if not noImages:
         return [[0], None, None, None]
     image_list = sorted_collection.toList(sorted_collection.size())
     nImage, band_values = 0, {'Blue': None}
     
-    # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
+    # repeatedly check for cloud free pixels (non-null value) in landsat 9, 8 and 7 in that order
     while band_values['Blue'] == None and nImage < noImages:
         nearest_image = ee.Image(image_list.get(nImage))
         nImage += 1
@@ -76,17 +78,18 @@ def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
     return [band_values, value['time_difference'], value['SPACECRAFT_ID'], 'EPSG:326' + str(value['UTM_ZONE'])]
 
 
+# resample images collections whose band values are not 30m for both UTM zones
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
 def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
-# reads Landsat data, flow accumulation, gridmet temperature, terraclimate and DEM data (for slope and elevation)
+# reads and merge Landsat data, and other datasets
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
-# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); gridmet/terraclimate (4,638.3m resolution)
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)

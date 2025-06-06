@@ -6,10 +6,10 @@
 
 import os, random
 import pandas as pd
-os.chdir("Code")    # change path to where csv is stored
+os.chdir("Code")    # change path to where github code is pulled from
 
 # read in landsat/flow data for all 18,144 meadows
-df = pd.read_csv("../csv/All_meadows_2022.csv")
+df = pd.read_csv("csv/All_meadows_2022.csv")
 
 # stratify meadows in 3 classes based on range of NIR values
 r1, r2 = max(df['B5_mean']), min(df['B5_mean'])
@@ -49,7 +49,7 @@ high_lat_high_NIR = high_NIR[high_NIR['latitude'] > l2+2*step].sample(n=10)
 frames = [low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, mid_lat_mid_NIR, 
           high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
 data = pd.concat(frames)
-data.to_csv('../csv/training_and_test_data.csv', index=False)
+data.to_csv('csv/training_and_test_data.csv', index=False)
 
 
 # import relevant ML modules and classes
@@ -61,7 +61,7 @@ from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("../csv/training_and_test_data.csv")
+data = pd.read_csv("csv/training_and_test_data.csv")
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in data if c not in ['ID', 'QA_PIXEL_mean', 'QA_PIXEL_variance', 'Is_meadow']]
 X = data.loc[:, var_col] # var_col are all columns in csv except above 4
@@ -133,7 +133,7 @@ print(conf_matrix)
 
 
 # read in meadow data again without NaNs
-df = pd.read_csv("../csv/All_meadows_2022.csv").dropna()
+df = pd.read_csv("csv/All_meadows_2022.csv").dropna()
 # drop columns without landsat data and run predictions
 X_vars = df.loc[:, var_col]
 meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]
@@ -146,7 +146,7 @@ X_vars.shape[0] - noMeadows     # number of False meadows
 obscure_data = df.loc[(meadow_pred > 0.4) & (meadow_pred < 0.65)]
 obscure_data = obscure_data.assign(Is_meadow = None)
 
-# repeat stratification for sampling additional meadows
+# repeat NIR stratification for sampling additional meadows
 r1, r2 = max(obscure_data['B5_mean']), min(obscure_data['B5_mean'])
 step = (r1-r2)/3
 low_NIR = obscure_data[obscure_data['B5_mean'] < r2+step]
@@ -155,6 +155,7 @@ high_NIR = obscure_data[obscure_data['B5_mean'] > r2+2*step]
 
 random.seed(48)
 
+# stratify low NIR meadows into 3 latitude classes and draw 10 random samples each
 l1, l2 = max(low_NIR['latitude']), min(low_NIR['latitude'])
 step = (l1-l2)/3
 low_lat_low_NIR = low_NIR[low_NIR['latitude'] < l2+step].sample(n=10)
@@ -179,12 +180,12 @@ high_lat_high_NIR = high_NIR[high_NIR['latitude'] > l2+2*step].sample(11)
 frames = [data, low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, mid_lat_mid_NIR, 
           high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
 newdf = pd.concat(frames).drop_duplicates(subset=['ID'])
-newdf.to_csv('../csv/new_training_and_test_data.csv', index=False)
+newdf.to_csv('csv/new_training_and_test_data.csv', index=False)
 
 
 
 # re-run ML for 180 samples
-data = pd.read_csv("../csv/new_training_and_test_data.csv")
+data = pd.read_csv("csv/new_training_and_test_data.csv")
 data.head()
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in data if c not in ['ID', 'longitude', 'latitude', 'QA_PIXEL_mean', 'QA_PIXEL_variance', 'Is_meadow']]
@@ -224,7 +225,7 @@ for i, x in enumerate(y_test):
     print(x, y_test_pred[i])
 
 # read in meadow data again without NaNs
-df = pd.read_csv("../csv/All_meadows_2022.csv").dropna()
+df = pd.read_csv("csv/All_meadows_2022.csv").dropna()
 # drop columns without landsat data and run predictions
 X_vars = df.loc[:, var_col]
 meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]

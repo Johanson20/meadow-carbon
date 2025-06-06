@@ -15,6 +15,7 @@ os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 
+# resample and reproject when image's pixel size is not 30m for both UTM zones
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -22,9 +23,10 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 
+# load relevant polaris datasets of UTM Zone 10 and extract each of the first unique 4 depths
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
@@ -47,6 +49,7 @@ l2_organic_m = ee.Image(organic_m.toList(6).get(1))
 l3_organic_m = ee.Image(organic_m.toList(6).get(2))
 l4_organic_m = ee.Image(organic_m.toList(6).get(3))
 
+# load same as above for UTM Zone 11
 perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
 hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
 organic_m_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample11)
@@ -82,7 +85,7 @@ for idx in range(data.shape[0]):
     next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     
     # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
-    if x >= -120:   # zone 32611
+    if x >= -120:   # corresponds to zone 32611
         l1_clay = l1_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l2_clay = l2_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_clay = l3_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -99,7 +102,7 @@ for idx in range(data.shape[0]):
         l2_organic = l2_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_organic = l3_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l4_organic = l4_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    else:
+    else:   # zone 32610
         l1_clay = l1_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l2_clay = l2_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_clay = l3_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -153,10 +156,10 @@ data['L2_Organic_Matter'] = L2_Org
 data['L3_Organic_Matter'] = L3_Org
 data['L4_Organic_Matter'] = L4_Org
 
-data.to_csv("../files/Belowground Biomass_RS Model_Data.csv", index=False)
+data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)
 
 
-# Another extraction (depth classes of polaris soil averaged)
+# Another extraction (depth classes of polaris soil averaged for first 3; 4th depth used alone)
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
@@ -201,7 +204,7 @@ for idx in range(data.shape[0]):
         shallow_hydra = shallow_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         deep_hydra = deep_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         organic = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    else:
+    else:   # zone 32610
         shallow_clay = shallow_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         deep_clay = deep_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         shallow_hydra = shallow_hydra_cond.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -222,4 +225,4 @@ data['Shallow_Hydra_Conduc'] = Shallow_Hydra
 data['Deep_Hydra_Conduc'] = Deep_Hydra
 data['Organic_Matter'] = Organic
 
-data.to_csv("../files/Belowground Biomass_RS Model_Data1.csv", index=False)
+data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)

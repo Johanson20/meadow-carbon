@@ -89,7 +89,7 @@ dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reduc
 slopeDem_11 = ee.Terrain.slope(dem_11)
 terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['tmmn', 'tmmx', 'pr']).map(resample11)
 
-# these polaris soil datasets have 30m spatial resolution (same as landsat above)
+# these polaris soil datasets have 30m spatial resolution (same as landsat above); lithology is 90m resolution
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 perc_sand = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample10)
@@ -337,17 +337,17 @@ y_test_pred = bgb_soilc_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
+train_corr = np.corrcoef(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)*100
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
-test_p_bias = sum(val[np.isfinite(val)]) * 100
+test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
 print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
@@ -377,7 +377,7 @@ def plotY():
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("Test set (y_test)")
+    plt.title(f"Test set (y_test); R = {np.round(test_corr[0][1], 4)}")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
@@ -450,17 +450,17 @@ y_test_pred = bgb_percentc_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-train_mape = mean_absolute_percentage_error(y_train_pred, y_train)
+train_mape = mean_absolute_percentage_error(y_train_pred, y_train)*100
+train_corr = np.corrcoef(y_train, y_train_pred)
 val = (y_train_pred - y_train) / y_train
 train_p_bias = np.mean(val[np.isfinite(val)]) * 100
-train_corr = np.corrcoef(y_train, y_train_pred)
 
 test_mae = mean_absolute_error(y_test, y_test_pred)
 test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-test_mape = mean_absolute_percentage_error(y_test_pred, y_test)
+test_mape = mean_absolute_percentage_error(y_test_pred, y_test)*100
 test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
-test_p_bias = sum(val[np.isfinite(val)]) * 100
+test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
 print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
 print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))

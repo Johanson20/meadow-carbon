@@ -17,6 +17,7 @@ filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
 '''
+# fix coordinate values that are often mistyped
 data.columns
 data.loc[:, ['Longitude', 'Latitude']].describe()
 idx = data[data['Longitude'] > -116].index
@@ -70,8 +71,9 @@ def maskCloud(image):
 
 
 def getBandValues(image):
+    # extract band values (with indices) alongside UTM, date and timezone of landsat image
     image = calculateIndices(image)
-    values = image.reduceRegion(reducer=ee.Reducer.first(), geometry=point, scale=30)
+    values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
     utm_zone = image.get('UTM_ZONE')
     return ee.Feature(None, values).set('Date', date).set('UTM', utm_zone)
@@ -79,10 +81,12 @@ def getBandValues(image):
 
 # get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def extractAllValues(landsat, year):
+    # get band values and ensure it is not null
     landsat_values = landsat.map(getBandValues).getInfo()['features']
     if not landsat_values:
         return [{'Blue': None}, {'Blue': None}, 0, {'Blue': None}, 0, 0]
     values = []
+    # convert band values and other properties to a dataframe for manipulation
     for feature in landsat_values:
         values.append(feature['properties'])
     df = pd.DataFrame(values)
@@ -96,6 +100,7 @@ def extractAllValues(landsat, year):
     date_range = pd.date_range(start=str(years[0])+"-10-01", end=str(years[-1])+"-10-01", freq='D')[:-1]
     df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill()
     df_daily.dropna(inplace=True)
+    # also extract two sets of values: the current year and the previous 5 years.
     df_prev_5 = df_daily.loc[:str(years[-1]-1)+"-09-30"]
     df_year = df_daily.loc[str(years[-1]-1)+"-10-01":]
     
@@ -112,6 +117,7 @@ def extractAllValues(landsat, year):
     return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode().iloc[0], integrals, no_snow_days, no_wet_days]
 
 
+# resample images collections whose band values are not 30m for both UTM zones
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -119,13 +125,13 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-# reads Landsat data, flow accumulation, daymet, terraclimate and DEM data (for slope and elevation)
+# reads and merge Landsat data, and other datasets
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskCloud)
 
-# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); 
+# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); gridmet/terraclimate (4,638.3m resolution)
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
@@ -187,16 +193,16 @@ for idx in range(data.shape[0]):
     landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, year+"-10-01")
     bands_June, bands_Sept, utm, integrals, snow_days, wet_days = extractAllValues(landsat, year)
     
-    if not bands_June['Blue'] or not bands_Sept['Blue']:     # drop rows that returned no value
+    if not bands_June['Blue'] or not bands_Sept['Blue']:     # drop rows that returned null band values
         data.drop(idx, inplace=True)
         print("Row", idx, "dropped!")
         continue
     
-    if not integrals['Blue']:
+    if not integrals['Blue']:   # if integrals are null (probably from null band values), assign zero to them
         for band in integrals.index:
             integrals[band] = 0
     
-    # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
+    # compute band values: daymetv4 (1km resolution) can also be used for SWE
     mycrs = 'EPSG:326' + str(utm)
     if mycrs == "EPSG:32611":
         tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
