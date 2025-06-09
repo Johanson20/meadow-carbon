@@ -7,59 +7,113 @@
 import os, ee
 import pandas as pd
 import geopandas as gpd
+import numpy as np
+from shapely.geometry import Point
 os.chdir("Code")
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
 
-# read in shapefile, landsat and flow accumulation data
-shapefile = gpd.read_file("files/AllPossibleMeadows_2024-04-01.shp")
-landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
-flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 
-# Function to mask clouds
-def maskClouds(image):
-    quality = image.select('QA_PIXEL')
-    cloud = quality.bitwiseAnd(1 << 3).eq(0)    # mask out cloudy pixels
-    cloudShadow = quality.bitwiseAnd(1 << 4).eq(0)     # mask out cloud shadow
-    return image.updateMask(cloud).updateMask(cloudShadow)
+def calculateIndices(image):
+    # calculate and add indices from landsat band values
+    ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
+    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
+    return image.addBands([ndvi, ndwi])
+
+
+def maskCloudAndRename(image):
+    # rename bands and mask out cloud based on bits in QA_pixel; then scale values
+    image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
+    qa = image.select('QA')
+    dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
+    cirrus = qa.bitwiseAnd(1 << 2).eq(0)
+    cloud = qa.bitwiseAnd(1 << 3).eq(0)
+    cloudShadow = qa.bitwiseAnd(1 << 4).eq(0)
+    cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
+    image = image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
+    scaled_bands = image.multiply(2.75e-05).add(-0.2)
+    return image.addBands(scaled_bands, overwrite=True)
+
+
+def randomPolygonPoint(polygon):
+    # extract coordinate of random point in a polygon (random seed ensures reproducibility) of result
+    np.random.seed(10)
+    minx, miny, maxx, maxy = polygon.bounds
+    for _ in range(100):  # Limit retries
+        x, y = np.random.uniform(minx, maxx), np.random.uniform(miny, maxy)
+        p = Point(x, y)
+        if polygon.contains(p):
+            return [x, y]
+    return None
+
+
+# read in meadows shapefile and buffer by 1km; relevant datasets are landsat, elevation and flow accumulation data
+epsg_crs = "EPSG:4326"
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-06-06.shp").to_crs(epsg_crs)
+combined_meadows = meadows.union_all()
+# Spatial resolutions: landsat is 30m, flow is 463.83m, elevation is 10.2m 
+landsat9_collection = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
+landsat = landsat9_collection.filterDate('2022-07-01', '2022-07-31').map(maskCloudAndRename).map(calculateIndices)
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").resample('bilinear').reproject(crs="EPSG:32610", scale=30)
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").resample('bilinear').reproject(crs="EPSG:32611", scale=30)
+dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+tpi = dem.subtract(dem.focalMean(5, 'square')).rename('TPI')
+tpi_11 = dem_11.subtract(dem_11.focalMean(5, 'square')).rename('TPI')
+slopeDem = ee.Terrain.slope(dem)
+slopeDem_11 = ee.Terrain.slope(dem_11)
 
 # initialize dataframe with relevant variables
-df = pd.DataFrame(columns=['ID', 'longitude', 'latitude', 'flow_accumulation', 'QA_PIXEL_mean', 'QA_PIXEL_variance',
-                           'B1_mean', 'B1_variance', 'B2_mean', 'B2_variance', 'B3_mean', 'B3_variance', 'B4_mean', 
-                           'B4_variance', 'B5_mean', 'B5_variance', 'B6_mean', 'B6_variance', 'B7_mean', 'B7_variance'])
+meadow_data = pd.DataFrame(columns=['ID', 'Area_m2', 'Longitude', 'Latitude', 'BLue_mean', 'Blue_var', 'Green_mean', 'Green_var',
+                           'NDVI_mean', 'NDVI_var', 'NDWI_mean', 'NDWI_var', 'NIR_mean', 'NIR_var', 'Red_mean', 'Red_var',
+                           'SWIR_1_mean', 'SWIR_1_var', 'SWIR_2_mean', 'SWIR_2_var', 'TPI', 'Flow', 'Slope', 'IsMeadow'])
 
-# iterate through each polygon of shapefile
-for index, row in shapefile.iterrows():
-    feature = row.geometry
-    lon, lat = feature.centroid.coords[0]
+# iterate through each meadow: extract centroid's values and random non-meadow point
+for meadowIdx in range(len(meadows)):
+    feature = meadows.loc[meadowIdx, :]
+    lon, lat = feature.geometry.centroid.coords[0]
+    point = ee.Geometry.Point(lon, lat)
     
-    # extract polygon bounding coordinates (they are either single and whole or multiple and disjoint)
-    if feature.geom_type == 'Polygon':
-        shapefile_bbox = ee.Geometry.Polygon(list(feature.exterior.coords))
-    elif feature.geom_type == 'MultiPolygon':
-        shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geoms))
+    # buffer meadow and extract random point in the buffer but outside all actual meadows
+    buffer = feature.geometry.buffer(0.001)     # buffer units in latitude due to crs (~1km or ~1.11km)
+    buffer_no_meadow = buffer.difference(combined_meadows)
+    lon2, lat2 = randomPolygonPoint(buffer_no_meadow)
+    non_meadow_point = ee.Geometry.Point(lon2, lat2)
     
-    # read in flow and landsat data for every 30m square (note that flow acc actually has 463.83m resolution)
-    flow_30m = flow_acc.resample('bilinear')
-    flow = flow_30m.reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()['b1']
-    landsat_images = landsat8_collection.filterBounds(shapefile_bbox).map(maskClouds)
+    # read in values of relevant datasets for meadow's centroid and non-meadow random point
+    landsat_images = landsat.filterBounds(point)
+    np_landsat = landsat.filterBounds(non_meadow_point)
+    if lon >= -120:   # corresponds to zone 32611
+        flow = flow_acc_11.clip(point)
+        slope_val = slopeDem_11.clip(point)
+        tpi_val = tpi_11.clip(point)
+        # same extraction for non-meadow point
+        nflow = flow_acc_11.clip(non_meadow_point)
+        nslope_val = slopeDem_11.clip(non_meadow_point)
+        ntpi_val = tpi_11.clip(non_meadow_point)
+    else:   # corresponds to zone 32610
+        flow = flow_acc.clip(point)
+        slope_val = slopeDem.clip(point)
+        tpi_val = tpi.clip(point)
+        # same extraction for non-meadow point
+        nflow = flow_acc.clip(non_meadow_point)
+        nslope_val = slopeDem.clip(non_meadow_point)
+        ntpi_val = tpi.clip(non_meadow_point)
     
-    # extract mean and variance of landsat and read relevant band names
+    # extract mean and variance of landsat and combine bands
     band_stats = landsat_images.reduce(ee.Reducer.mean().combine(ee.Reducer.variance(), sharedInputs=True))
-    relevant_bands = band_stats.bandNames().getInfo()[:14] + band_stats.bandNames().getInfo()[34:36]
+    nband_stats = np_landsat.reduce(ee.Reducer.mean().combine(ee.Reducer.variance(), sharedInputs=True))
+    combined_bands = band_stats.addBands([flow, slope_val, tpi_val])
+    ncombined_bands = nband_stats.addBands([nflow, nslope_val, ntpi_val])
+    # append band values to dataframe
+    bandVal = combined_bands.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    nbandVal = ncombined_bands.reduceRegion(ee.Reducer.mean(), non_meadow_point, 30).getInfo()
+    meadow_data.loc[len(meadow_data)] = list(feature.values[:2]) + [lon, lat] + list(bandVal.values()) + ['Yes']
+    meadow_data.loc[len(meadow_data)] = [feature.ID, 0, lon2, lat2] + list(nbandVal.values()) + ['No']
     
-    # compute band values of landsat (try block handles failure in cases of data overload for huge meadows)
-    try:
-        bandVal = band_stats.select(relevant_bands).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        df.loc[index] = [row.values[0], lon, lat, flow] + [s for s in bandVal.values()]
-    except:
-        bandVal = band_stats.select(relevant_bands[:8]).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        valu = band_stats.select(relevant_bands[8:]).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        df.loc[index] = [row.values[0], lon, lat, flow] + [s for s in list(valu.values())[:2]] + [s for s in bandVal.values()] + [s for s in list(valu.values())[2:]]
-    
-    if index%100==0: print(index, end=" ")
+    if meadowIdx%20==0: print(meadowIdx, end=" ")
 
-shapefile = None
-df.to_csv('csv/All_meadows_2022.csv', index=False)
+meadows = None
+meadow_data.to_csv('csv/All_meadows_2022.csv', index=False)

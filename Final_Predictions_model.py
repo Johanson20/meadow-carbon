@@ -178,7 +178,6 @@ def maskAndRename(image):
 
 def calculateIndices(image):
     # calculate and add indices from landsat band values
-    image = image.select(['Blue', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
     ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
