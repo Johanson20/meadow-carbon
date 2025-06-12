@@ -2,9 +2,8 @@
 """
 Created on Fri Jun 21 15:32:47 2024
 
-@author: jonyegbula
+@author: Johanson C. Onyegbula
 """
-
 
 import os
 import ee

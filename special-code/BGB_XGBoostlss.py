@@ -2,7 +2,7 @@
 """
 Created on Mon Jan 27 14:08:10 2025
 
-@author: jonyegbula
+@author: Johanson C. Onyegbula
 """
 
 from xgboostlss.model import *

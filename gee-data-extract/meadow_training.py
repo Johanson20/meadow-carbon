@@ -3,13 +3,15 @@
 @author: Johanson C. Onyegbula
 """
 
-
 import os, ee
 import pandas as pd
+import warnings
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
+
 os.chdir("Code")
+warnings.filterwarnings("ignore")
 
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
@@ -41,7 +43,7 @@ def randomPolygonPoint(polygon):
     # extract coordinate of random point in a polygon (random seed ensures reproducibility) of result
     np.random.seed(10)
     minx, miny, maxx, maxy = polygon.bounds
-    for _ in range(100):  # Limit retries
+    for _ in range(1000):  # Limit retries
         x, y = np.random.uniform(minx, maxx), np.random.uniform(miny, maxy)
         p = Point(x, y)
         if polygon.contains(p):
@@ -115,5 +117,49 @@ for meadowIdx in range(len(meadows)):
     
     if meadowIdx%20==0: print(meadowIdx, end=" ")
 
+meadow_data.to_csv('csv/Real_and_false_meadows.csv', index=False)
+
+
+import geemap
+ee.Initialize()
+
+# extract points of real and false meadows and convert to a feature collection for GEE classifier
+meadow_points = gpd.GeoDataFrame({'MeadowId': meadow_data['ID'], 'Longitude': meadow_data['Longitude'], 'Latitude': meadow_data['Latitude'], 'IsMeadow': [1 if c == 'Yes' else 0 for c in meadow_data['IsMeadow']]}, geometry = [Point(x,y) for x,y in zip(meadow_data['Longitude'], meadow_data['Latitude'])], crs=epsg_crs)
+featureColl = geemap.geopandas_to_ee(meadow_points, geodesic=False)
+# combine relevant imagery to be used as predictors (independent variables)
+flow_acc = ee.Image("WWF/HydroSHEDS/15ACC")
+dem = ee.Image('USGS/3DEP/10m').select('elevation')
+tpi = dem.subtract(dem.focalMean(5, 'square')).rename('TPI')
+slopeDem = ee.Terrain.slope(dem)
+predictors = landsat.median().addBands([flow_acc, slopeDem, tpi])
+# ensure feature collection has a label for classification ('IsMeadow') of type Float
+training = predictors.sampleRegions(collection=featureColl, properties=['IsMeadow'], scale=30, geometries=False)
+
+# tune hyperparameter for number of trees
+best_tree = {}
+for ntree in range(10, 300, 5):
+    classifier = ee.Classifier.smileRandomForest(numberOfTrees=ntree, seed=10).train(features=training, classProperty='IsMeadow', inputProperties=predictors.bandNames())
+    classified = predictors.classify(classifier)
+    validation = classified.sampleRegions(collection=featureColl, properties=['IsMeadow'], scale=30, geometries=False)
+    acc = validation.errorMatrix('IsMeadow', 'classification').accuracy().getInfo()
+    best_tree[ntree] = acc
+    print(ntree, "=", acc,  end=' ')
+
+# use best result
+ntrees = 50     # max(best_tree, key=best_tree.get)
+classifier = ee.Classifier.smileRandomForest(numberOfTrees=ntrees, seed=10).train(features=training, classProperty='IsMeadow', inputProperties=predictors.bandNames())
+classified = predictors.classify(classifier)
+
+# extract predictions of classes and append predictions to dataset for IDs available
+classes = classified.sampleRegions(collection=featureColl, properties=['IsMeadow'], scale=30, geometries=False)
+classes = ee.data.computeFeatures({'expression': classes, 'fileFormat': 'PANDAS_DATAFRAME'})
+meadow_points['RFPredictedClass'] = classes['classification']
+realMeadows = meadows[meadows['ID'].isin(set(meadow_data['ID']))]
+realMeadows['RFPredictedClass'] = meadow_points.groupby('MeadowId')['RFPredictedClass'].first()
+
+'''meadow_data.dropna(inplace=True)
+meadow_data.drop_duplicates(inplace=True)
+meadow_data.reset_index(drop=True, inplace=True)'''
+meadow_points.to_file("files/Meadow_Points.shp", driver="ESRI Shapefile")
+realMeadows.to_file("files/PredictedMeadows.shp", driver="ESRI Shapefile")
 meadows = None
-meadow_data.to_csv('csv/All_meadows_2022.csv', index=False)

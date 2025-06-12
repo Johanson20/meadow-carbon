@@ -2,7 +2,7 @@
 """
 Created on Tue Aug 20 15:45:06 2024
 
-@author: jonyegbula
+@author: Johanson C. Onyegbula
 """
 
 import os

@@ -3,7 +3,6 @@
 @author: Johanson C. Onyegbula
 """
 
-
 import os
 import ee
 import pandas as pd
