@@ -136,13 +136,13 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').re
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample10)
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample10)
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample10)
 
 flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32611", scale=30)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
 terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample11)
-gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
+gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample11)
 
 # these polaris soil datasets have 30m spatial resolution (same as landsat above); lithology is 90m resolution
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
@@ -176,7 +176,7 @@ dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
 dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI = [], [], [], [], [], [], []
 NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer = [], [], [], [], []
 NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall = [], [], [], [], []
-flow, slope, elevation, wet, snowy = [], [], [], [], []
+flow, slope, elevation, wet, snowy, S_Rad = [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
@@ -206,6 +206,7 @@ for idx in range(data.shape[0]):
     mycrs = 'EPSG:326' + str(utm)
     if mycrs == "EPSG:32611":
         tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        srad = gridmet_11.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
         daymet = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
@@ -221,6 +222,7 @@ for idx in range(data.shape[0]):
         shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        srad = gridmet.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
         daymet = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
@@ -241,6 +243,7 @@ for idx in range(data.shape[0]):
     cdef_value = 0.1*tclimate['def']
     aet = 0.1*tclimate['aet']
     temps = tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    rad = srad.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['srad']
     tmin = temps['tmmn']
     tmax = temps['tmmx']
     
@@ -280,6 +283,7 @@ for idx in range(data.shape[0]):
     cdef.append(cdef_value)
     min_temp.append(tmin)
     max_temp.append(tmax)
+    S_Rad.append(rad)
     
     Shallow_Clay.append(shallow_clay)
     Shallow_Sand.append(shallow_sand)
@@ -331,6 +335,7 @@ data['Snow_days'] = snowy
 data['Wet_days'] = wet
 data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
+data['SRad'] = S_Rad
 
 data['Shallow_Clay'] = Shallow_Clay
 data['Deep_Clay'] = Deep_Clay
@@ -350,9 +355,9 @@ data.to_csv(filename.split(".csv")[0] + "_5_year_Data.csv", index=False)
 
 
 # ML training starts here
-from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.utils import resample
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 from sklearn.inspection import PartialDependenceDisplay
 from matplotlib.backends.backend_pdf import PdfPages
@@ -406,12 +411,22 @@ with PdfPages('files/BGB_Scatter_plots.pdf') as pdf:
         pdf.savefig(fig)
         plt.close(fig)
 
-# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
-gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
-split = gsp.split(data, groups=data['ID'])
-train_index, test_index = next(split)
-train_data = data.iloc[train_index]
-test_data = data.iloc[test_index]
+# bin the dataset based on BGB values
+data[y_field].describe()
+data['BGB_bin_class'] = 0
+for value in range(2, 16, 2):   # max rounded value is 16
+    mask = (data[y_field] > value) & (data[y_field] <= (value+2))
+    data.loc[mask, 'BGB_bin_class'] = value//2
+data['BGB_bin_class'].describe()
+
+# split data into training (70%) and test data (30%) by IDs, random state ensures reproducibility
+train_df = data.groupby('BGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.7, random_state=10))
+test_data = data[~data.index.isin(train_df.index)]
+# upsample the training dataset so that all bins have same amount of rows
+max_size = train_df['BGB_bin_class'].value_counts().max()
+train_data = (train_df.groupby('BGB_bin_class', group_keys=False)
+    .apply(lambda x: resample(x, replace=True, n_samples=max_size, random_state=10)).reset_index(drop=True))
+train_data['BGB_bin_class'].value_counts()
 
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
