@@ -7,6 +7,7 @@ import os
 import ee
 import pickle
 import warnings
+import numpy as np
 import pandas as pd
 
 mydir = "Code"      # adjust directory
@@ -207,7 +208,7 @@ for idx in range(data.shape[0]):
     if mycrs == "EPSG:32611":
         tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         srad = gridmet_11.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
-        daymet = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
+        snow_we = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
@@ -223,7 +224,7 @@ for idx in range(data.shape[0]):
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         srad = gridmet.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
-        daymet = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
+        snow_we = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
         tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
         elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
         slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
@@ -237,7 +238,7 @@ for idx in range(data.shape[0]):
         lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         
-    swe_value = daymet.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     mean_pr = tclimate['pr']
     cdef_value = 0.1*tclimate['def']
@@ -287,12 +288,12 @@ for idx in range(data.shape[0]):
     
     Shallow_Clay.append(shallow_clay)
     Shallow_Sand.append(shallow_sand)
-    Shallow_Hydra.append(shallow_hydra)
+    Shallow_Hydra.append(np.power(10, shallow_hydra))
     Lithology.append(lith)
     Deep_Clay.append(deep_clay)
     Deep_Sand.append(deep_sand)
-    Deep_Hydra.append(deep_hydra)
-    Organic_Matter.append(shall_org)
+    Deep_Hydra.append(np.power(10, deep_hydra))
+    Organic_Matter.append(np.power(10, shall_org))
     
     if idx%20 == 0: print(idx, end=' ')
 
@@ -381,7 +382,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in (list(cols[10:-6]) + list(cols[-4:])) if c not in ['dNDSI', 'Flow', 'Cdef', 'Lithology', 'SAVI_Sept', 'NDWI_Sept', 'Shallow_Clay', 'dNDWI', 'Deep_Clay', 'Wet_days', 'dEVI', 'Deep_Hydra_Conduc', 'dSWIR_2', 'dBSI', 'EVI_June']]
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Elevation', 'AET', 'Flow', 'Lithology', 'Wet_days', 'Deep_Clay', 'EVI_June', 'Minimum_temperature', 'NDWI_Sept', 'Slope', 'dSWIR_1', 'Deep_Hydra_Conduc', 'Maximum_temperature', 'dNDWI', 'NDWI_June']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -419,8 +420,8 @@ for value in range(2, 16, 2):   # max rounded value is 16
     data.loc[mask, 'BGB_bin_class'] = value//2
 data['BGB_bin_class'].describe()
 
-# split data into training (70%) and test data (30%) by IDs, random state ensures reproducibility
-train_df = data.groupby('BGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.7, random_state=10))
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+train_df = data.groupby('BGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=10))
 test_data = data[~data.index.isin(train_df.index)]
 # upsample the training dataset so that all bins have same amount of rows
 max_size = train_df['BGB_bin_class'].value_counts().max()
@@ -432,7 +433,8 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(random_state=10)
+bgb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=7, n_estimators=125, subsample=0.8, validation_fraction=0.2,
+                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
@@ -541,7 +543,8 @@ def plotTrainY():
 plotFeatureImportance()
 plotTestY()
 plotTrainY()
-
+np.array(bgb_model.feature_names_in_)[sorted_idx]
+np.array(bgb_model.feature_importances_)[sorted_idx]
 
 # same procedure as above
 data = pd.read_csv("csv/Aboveground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
@@ -580,12 +583,22 @@ with PdfPages('files/AGB_Scatter_plots.pdf') as pdf:
         pdf.savefig(fig)
         plt.close(fig)
 
-# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
-gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
-split = gsp.split(data, groups=data['ID'])
-train_index, test_index = next(split)
-train_data = data.iloc[train_index]
-test_data = data.iloc[test_index]
+# bin the dataset based on BGB values
+data[y_field].describe()
+data['AGB_bin_class'] = 0
+for value in range(50, 2450, 50):   # max rounded value is 2448
+    mask = (data[y_field] > value) & (data[y_field] <= (value+50))
+    data.loc[mask, 'AGB_bin_class'] = value//50
+data['AGB_bin_class'].describe()
+
+# split data into training (70%) and test data (30%) by IDs, random state ensures reproducibility
+train_df = data.groupby('AGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.7, random_state=10))
+test_data = data[~data.index.isin(train_df.index)]
+# upsample the training dataset so that all bins have same amount of rows
+max_size = train_df['AGB_bin_class'].value_counts().max()
+train_data = (train_df.groupby('AGB_bin_class', group_keys=False)
+    .apply(lambda x: resample(x, replace=True, n_samples=max_size, random_state=10)).reset_index(drop=True))
+train_data['AGB_bin_class'].value_counts()
 
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]

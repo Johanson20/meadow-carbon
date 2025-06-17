@@ -86,6 +86,8 @@ def processGeotiff(df):
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
     df['AET'] *= 0.1
+    logCols = ['Organic_Matter', 'Shallow_Hydra_Conduc']
+    df[logCols] = df[logCols].apply(lambda col: np.power(10, col))
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies in blank/filled values between landsat and gridmet combined days
     NA_Ids = df['Minimum_temperature'].isna()
@@ -133,7 +135,7 @@ def interpolate_group(group):
     group = group.drop_duplicates(subset='Date').set_index('Date').reindex(date_range)
     group['Month'] = group.index.month
     interp_cols = [col for col in group.columns if col not in ['AET', 'Annual_Precipitation', 'Month']]
-    # interpolate daily values for all bands except AET (which is monthly values only)
+    # interpolate daily values for all daily bands; and them monthly bands (AET and Precipitation)
     group.loc[:, interp_cols] = group.loc[:, interp_cols].interpolate(method='time').ffill().bfill()
     group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
     group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
@@ -189,7 +191,7 @@ def calculateIndices(image):
 
 def loadYearCollection(year):
     # load GEE data for the relevant year and make folders for each year
-    global date_range, start_year, end_year, landsat_5_year, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, daymet_10, daymet_11
+    global date_range, start_year, end_year, landsat_5_year, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, swe_10, swe_11
     start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
     date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
     landsat_collection = landsat.filterDate(start_year, end_year)
@@ -197,8 +199,8 @@ def loadYearCollection(year):
     gridmet_11 = gridmet.filterDate(start_year, end_year).map(resample11)
     terraclimate_10 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample10)
     terraclimate_11 = terraclimate.filterDate(start_year, end_year.replace("-10-", "-11-")).map(resample11)
-    daymet_10 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample10).first()
-    daymet_11 = daymet.filterDate(str(year)+'-04-01', str(year)+'-04-02').map(resample11).first()
+    swe_10 = snow_we.filterDate(str(year)+'-04-01', str(year)+'-05-01').map(resample10).first()
+    swe_11 = snow_we.filterDate(str(year)+'-04-01', str(year)+'-05-01').map(resample11).first()
     os.makedirs(f"files/{year}", exist_ok=True)
     os.makedirs(f"files/bands/{year}", exist_ok=True)
 
@@ -232,7 +234,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         flow_30m = flow_acc_11.clip(shapefile_bbox)
         elev_30m = dem_11.clip(shapefile_bbox)
         slope_30m = slope_11.clip(shapefile_bbox)
-        swe_30m = daymet_11.clip(shapefile_bbox)
+        swe_30m = swe_11.clip(shapefile_bbox)
         # shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
         # deep_clay = deep_perc_clay_11.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox)
@@ -242,7 +244,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         flow_30m = flow_acc_10.clip(shapefile_bbox)
         elev_30m = dem_10.clip(shapefile_bbox)
         slope_30m = slope_10.clip(shapefile_bbox)
-        swe_30m = daymet_10.clip(shapefile_bbox)
+        swe_30m = swe_10.clip(shapefile_bbox)
         # shall_clay = shallow_perc_clay.clip(shapefile_bbox)
         # deep_clay = deep_perc_clay.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond.clip(shapefile_bbox)
@@ -404,11 +406,11 @@ shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 
-gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
+gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx', 'srad'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
-daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Elevation', 'Slope', 'SWE', 'Organic_Matter', 'Shallow_Hydra_Conduc', 'NDWI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'BSI_Sept', 'EVI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
-recurringBands, allBands = len(cols[:11]), len(cols[:-9])
+snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select('swe')
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Flow', 'Elevation', 'Slope', 'SWE', 'Organic_Matter', 'Shallow_Hydra_Conduc', 'NDWI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'BSI_Sept', 'EVI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
 current_time = datetime.strptime('20/05/2025', '%d/%m/%Y').timestamp()*1000
