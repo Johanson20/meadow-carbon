@@ -14,6 +14,7 @@ os.chdir(mydir)
 # read csv file and convert dates from strings to datetime
 filename = "csv/GHG Flux_RS Model.csv"
 data = pd.read_csv(filename)
+data.head()
 '''
 # fix coordinate values that are often mistyped
 data.columns
@@ -23,7 +24,6 @@ data.loc[idx, 'Longitude'] -= 100
 data.drop("Unnamed: 0", axis=1, inplace=True)
 data.to_csv(filename, index=False)
 '''
-data.head()
 data.drop_duplicates(inplace=True)  # remove duplicate rows
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 nullIds = data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index
@@ -203,7 +203,8 @@ data.to_csv('csv/GHG_Flux_RS_Model_Data.csv', index=False)
 
 
 # ML training starts here
-from sklearn.model_selection import GroupShuffleSplit, GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.utils import resample
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
@@ -224,7 +225,7 @@ data = data.loc[:, cols]
 data.drop_duplicates(inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[8:] if c not in ['Elevation', 'Driver', 'Days_of_data_acquisition_offset']]
+var_col = [c for c in cols[8:] if c not in ['Flow', 'Driver', 'Days_of_data_acquisition_offset']]
 y_field = 'CO2.umol.m2.s'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -250,12 +251,27 @@ with PdfPages('files/GHG_Scatter_plots.pdf') as pdf:
         pdf.savefig(fig)
         plt.close(fig)
 
+data[y_field].describe()
+data['GHG_bin_class'] = 0
+for value in range(1, 30, 2):   # max rounded value is 30
+    mask = (data[y_field] > value) & (data[y_field] <= (value+2))
+    data.loc[mask, 'GHG_bin_class'] = value//2
+data['GHG_bin_class'].describe()
+
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
-gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
+train_df = data.groupby('GHG_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=10))
+test_data = data[~data.index.isin(train_df.index)]
+# upsample the training dataset so that all bins have same amount of rows
+max_size = train_df['GHG_bin_class'].value_counts().max()
+train_data = (train_df.groupby('GHG_bin_class', group_keys=False)
+    .apply(lambda x: resample(x, replace=True, n_samples=max_size, random_state=10)).reset_index(drop=True))
+train_data['GHG_bin_class'].value_counts()
+
+'''gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
 split = gsp.split(data, groups=data['ID'])
 train_index, test_index = next(split)
 train_data = data.iloc[train_index]
-test_data = data.iloc[test_index]
+test_data = data.iloc[test_index]'''
 
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
@@ -280,10 +296,10 @@ grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=11, n_estimators=500, subsample=1.0, validation_fraction=0.2,
+ghg_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=14, n_estimators=2000, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-ghg_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.03, alpha=0.8413, max_depth=11, 
-                                      n_estimators=500, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
+ghg_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.01, alpha=0.8413, max_depth=14, 
+                                      n_estimators=2000, subsample=0.3, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)

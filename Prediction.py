@@ -321,16 +321,16 @@ def resample11(image):
 
 
 #load ML GBM and SD models
-with open('csv/models.pckl', 'rb') as f:
+with open('files/models.pckl', 'rb') as f:
     ghg_model, agb_model, bgb_model = pickle.load(f)
-with open('csv/sd_models.pckl', 'rb') as f:
+with open('files/sd_models.pckl', 'rb') as f:
     ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
 ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(agb_84_model.feature_names_in_), list(bgb_84_model.feature_names_in_)
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
@@ -540,7 +540,7 @@ def processMeadow(meadowCues):
         return -4
 
 '''
-meadowIdx = 16138   # 16103 (largest), 16914 (smallest)
+meadowIdx = 15439   # 15405 (largest), 16178 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''

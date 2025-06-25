@@ -17,6 +17,8 @@ os.chdir(mydir)
 filename = "csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
+data = pd.read_csv(filename)
+data.head()
 '''
 # fix coordinate values that are often mistyped
 data.columns
@@ -26,10 +28,7 @@ data.loc[idx, 'Longitude'] -= 100
 data.drop("Unnamed: 0", axis=1, inplace=True)
 data.to_csv(filename, index=False)
 '''
-data = pd.read_csv(filename)
-data.head()
 data.drop_duplicates(inplace=True)  # remove duplicate rows
-
 data.loc[:, ['Longitude', 'Latitude', 'SampleDate']].isna().sum()   # should be 0 for all columns
 nullIds =  data[data[['Longitude', 'Latitude', 'SampleDate']].isna().any(axis=1)].index    # rows with null coordinates/dates
 data.drop(nullIds, inplace = True)
@@ -382,7 +381,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Elevation', 'AET', 'Flow', 'Lithology', 'Wet_days', 'Deep_Clay', 'EVI_June', 'Minimum_temperature', 'NDWI_Sept', 'Slope', 'dSWIR_1', 'Deep_Hydra_Conduc', 'Maximum_temperature', 'dNDWI', 'NDWI_June']]
+var_col = [c for c in list(cols[11:]) if c not in ['dNDSI', 'Cdef', 'AET', 'Flow', 'Wet_days', 'Lithology', 'EVI_Sept', 'NDWI_Sept', 'Shallow_Clay', 'EVI_June', 'dNDWI', 'dEVI', 'dRed', 'NDPI_June', 'SAVI_June', 'dSWIR_2', 'dNDVI']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -433,7 +432,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=7, n_estimators=125, subsample=0.8, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=9, n_estimators=75, subsample=1.0, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
@@ -444,7 +443,9 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, random_state=10)
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.3, max_depth=4, n_estimators=50,
+                                         subsample=0.7, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+                                         verbose=1, random_state=10)
 
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
@@ -558,7 +559,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in cols[18:-8] if c not in ['dNDSI', 'Cdef', 'SWE', 'Wet_days', 'Flow']]  # for the 5-year averaged data
+var_col =  [c for c in list(cols[18:-9]) + ['SRad'] if c not in ['dNDSI', 'AET', 'SWE', 'Wet_days', 'Cdef', 'Flow']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -591,8 +592,8 @@ for value in range(50, 2450, 50):   # max rounded value is 2448
     data.loc[mask, 'AGB_bin_class'] = value//50
 data['AGB_bin_class'].describe()
 
-# split data into training (70%) and test data (30%) by IDs, random state ensures reproducibility
-train_df = data.groupby('AGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.7, random_state=10))
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+train_df = data.groupby('AGB_bin_class', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=10))
 test_data = data[~data.index.isin(train_df.index)]
 # upsample the training dataset so that all bins have same amount of rows
 max_size = train_df['AGB_bin_class'].value_counts().max()
@@ -603,10 +604,10 @@ train_data['AGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=4, n_estimators=50, subsample=0.9, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.13, alpha=0.8413, max_depth=4, 
-                                      n_estimators=50, subsample=0.9, validation_fraction=0.2, n_iter_no_change=50,  
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.13, alpha=0.8413, max_depth=13, 
+                                      n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
@@ -669,7 +670,7 @@ plotTestY()
 plotTrainY()
 
 
-with open('csv/soil_models.pckl', 'wb') as f:   # there is also models.pckl
+with open('files/soil_models.pckl', 'wb') as f:   # there is also models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
-with open('csv/sd_models.pckl', 'wb') as f:
+with open('files/sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
