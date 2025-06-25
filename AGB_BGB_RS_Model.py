@@ -432,7 +432,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=9, n_estimators=75, subsample=1.0, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=6, n_estimators=75, subsample=0.4, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
@@ -443,8 +443,8 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.3, max_depth=4, n_estimators=50,
-                                         subsample=0.7, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.13, max_depth=6, n_estimators=75,
+                                         subsample=0.4, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                          verbose=1, random_state=10)
 
 bgb_model.fit(X_train, y_train)

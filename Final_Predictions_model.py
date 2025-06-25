@@ -237,6 +237,8 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         swe_30m = swe_11.clip(shapefile_bbox)
         # shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
         deep_clay = deep_perc_clay_11.clip(shapefile_bbox)
+        shall_sand = shallow_sand_11.clip(shapefile_bbox)
+        d_sand = deep_sand_11.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox)
         deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox)
         shall_org = shallow_organic_m_11.clip(shapefile_bbox)
@@ -247,6 +249,8 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         swe_30m = swe_10.clip(shapefile_bbox)
         # shall_clay = shallow_perc_clay.clip(shapefile_bbox)
         deep_clay = deep_perc_clay.clip(shapefile_bbox)
+        shall_sand = shallow_sand.clip(shapefile_bbox)
+        d_sand = deep_sand.clip(shapefile_bbox)
         shall_hydra = shallow_hydra_cond.clip(shapefile_bbox)
         deep_hydra = deep_hydra_cond.clip(shapefile_bbox)
         shall_org = shallow_organic_m.clip(shapefile_bbox)
@@ -277,10 +281,10 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         
         # align other satellite data with landsat and make resolution (30m)
         if idx == 0:     # extract constant values once for the same meadow
-            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, deep_clay, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
             if noImages > threshold:   # split image when bands would exceed 1024
                 bandnames1 = allBands
-                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, slope_30m, swe_30m, deep_clay, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
+                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, slope_30m, swe_30m, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
         else:
             if noBands < (1024 - recurringBands):
                 noBands += recurringBands     # for number of recurring bands
@@ -375,8 +379,8 @@ merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs
 sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
 
 # load all relevant GEE images/collections for both UTM Zones
-flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
-flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
+# flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
+# flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
 dem_10 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slope_10 = ee.Terrain.slope(dem_10).clip(sierra_zone)
@@ -389,19 +393,25 @@ landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2'
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
+perc_sand = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample10)
 hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample10)
 organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample10)
 perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
+perc_sand_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample11)
 hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
 organic_m_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1").map(resample11)
 
-shallow_perc_clay_11 = ee.ImageCollection(perc_clay_11.toList(3)).mean()
+# shallow_perc_clay_11 = ee.ImageCollection(perc_clay_11.toList(3)).mean()
 deep_perc_clay_11 = ee.Image(perc_clay_11.toList(6).get(3))
+shallow_sand_11 = ee.ImageCollection(perc_sand_11.toList(3)).mean()
+deep_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 shallow_hydra_cond_11 = ee.ImageCollection(hydra_cond_11.toList(3)).mean()
 deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
 shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
-shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
+# shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
 deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
+shallow_sand = ee.ImageCollection(perc_sand.toList(3)).mean()
+deep_sand = ee.Image(perc_sand.toList(6).get(3))
 shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
@@ -409,7 +419,7 @@ shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx', 'srad'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Deep_Clay', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
