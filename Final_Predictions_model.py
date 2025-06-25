@@ -369,10 +369,10 @@ shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
-shapefile['crs'] = "EPSG:32611"
+shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
-shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
+shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
 # add a buffer of 100m to Sierra Nevada
 minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
@@ -434,7 +434,7 @@ def prepareMeadows(meadowIdx):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = int(feature.ID), feature.crs
+        meadowId, mycrs = int(feature.ID), feature.epsgCode
         if feature.geometry.geom_type == 'Polygon':
             if feature.Area_km2 > 0.5:
                 feature.geometry = feature.geometry.simplify(0.00001)
@@ -498,7 +498,7 @@ def processMeadow(meadowCues):
         if totalBands <= allBands:
             return -1   # if no GEE data is available for the meadow's buffer
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = int(feature.ID), feature.crs
+        meadowId, mycrs = int(feature.ID), feature.epsgCode
             
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
@@ -588,7 +588,6 @@ def processMeadow(meadowCues):
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
-                gdf.plot(column=response_col, cmap='viridis', legend=True)
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
