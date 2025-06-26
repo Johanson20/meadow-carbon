@@ -6,6 +6,7 @@ Created on Tue Aug 20 15:45:06 2024
 """
 
 import os
+import glob
 import pandas as pd
 import geopandas as gpd
 import rioxarray as xr
@@ -146,30 +147,33 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg_crs)
 allIdx = shapefile.copy()
 shapefile = None
 shapefile = allIdx.copy()
 # identify each meadow as UTM Zone 10 or 11
-shapefile['crs'] = "EPSG:32611"
+shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
-shapefile.loc[shapefile['ID'].isin(allIdx), 'crs'] = "EPSG:32610"
+shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
 allIdx = None
 
 
 def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
-    all_files = [os.path.join(inputdir, f) for f in os.listdir(inputdir) if f.endswith(endname)]
+    all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     # extract indexes of the meadows of a distinct UTM zone
-    shps_to_use = shapefile[shapefile['crs'] == "EPSG:" + str(zone)].index
+    shps_to_use = shapefile[shapefile['epsgCode'] == "EPSG:" + str(zone)].index
     
     if endname.endswith(".tif"):
+        # write to a vrt file
+        vrt_path = f'{inputdir}/{variable}_Zone{str(zone)[-2:]}.vrt'
+        vrt = gdal.BuildVRT(vrt_path, all_files)
+        vrt.FlushCache()
+        vrt = None
         for file in all_files:
-            # distinguish between SD meadows and others
-            if file.endswith("1SD" + endname):
-                continue
+            # distinguish between meadows in different EPSG zones
             if int(file.split("_")[-2]) not in shps_to_use:
                 continue
             geotiff = xr.open_rasterio(file)
@@ -199,5 +203,5 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     out_grd.rio.to_raster(outfile)
 
 # mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "_NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "_NEP.tif", "NEP", 32611)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "NEP.tif")
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", "NEP", 32611)
