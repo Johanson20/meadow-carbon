@@ -6,6 +6,7 @@ Created on Mon Apr 22 11:03:25 2024
 """
 
 import os
+import glob
 import time
 import numpy as np
 import pickle
@@ -205,11 +206,40 @@ def loadYearCollection(year):
     os.makedirs(f"files/bands/{year}", exist_ok=True)
 
 
-def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None):
+def downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun):
+    mycrs = feature.epsgCode
+    # either directly download images of small meadows locally or export large ones to google drive before downloading locally
+    for i, subregion in enumerate(subregions):
+        image_name = f'{imagename}_{i}.tif'
+        if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
+            with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
+                if not os.path.exists(image_name) and not reRun:
+                    return True
+                if bandnames1 > allBands and os.path.exists(image_name):
+                    extra_image_name = f'{imagename}_{i}_e.tif'
+                    geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
+                    if not os.path.exists(extra_image_name):
+                        time.sleep(1.1)
+                        with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                            geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
+        if not os.path.exists(image_name):    # merge both images for g-drive download
+            if bandnames1 > allBands and residue_image is not None:
+                total_image = combined_image.addBands(residue_image)
+            else:
+                total_image = combined_image
+            try:
+                geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
+            except:
+                continue
+    return False
+
+
+def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilesplit=0):
     subregions = [shapefile_bbox] if makeSubRegions else 1
-    if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions
+    if feature.Area_km2 > 22 or tilesplit > 0:     # split bounds of large meadows into smaller regions
         xmin, ymin, xmax, ymax = feature.geometry.bounds
-        num_subregions = round(np.sqrt(feature.Area_km2/10))
+        num_subregions = tilesplit if tilesplit > 0 else round(np.sqrt(feature.Area_km2/10))
         subregion_width = (xmax - xmin) / num_subregions
         subregion_height = (ymax - ymin) / num_subregions
         subregions = [] if makeSubRegions else 1
@@ -330,11 +360,7 @@ def downloadFinishedTasks(image_names):
                 try:
                     file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
                 except:
-                    try:
-                        time.sleep(1.1)
-                        file_list = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false and title contains '{filename}'"}).GetList()
-                    except:
-                        return -3      # no filename matching the image_name is found    
+                    return -3      # no filename matching the image_name is found    
                 for file in file_list:
                     if file['title'] == filename + ".tif":
                         image_name = f"files/bands/{year}/{filename}.tif"
@@ -434,7 +460,7 @@ def prepareMeadows(meadowIdx):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = int(feature.ID), feature.epsgCode
+        meadowId, mycrs, reRun = int(feature.ID), feature.epsgCode, False
         if feature.geometry.geom_type == 'Polygon':
             if feature.Area_km2 > 0.5:
                 feature.geometry = feature.geometry.simplify(0.00001)
@@ -457,35 +483,14 @@ def prepareMeadows(meadowIdx):
         dates = [date/1000 for date in image_result['image_dates']]
         if not len(dates):
             return -1
+        # combine bands and split large meadows; then try downloading tiles as a whole or in split chunks
         combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
         subregions = splitMeadowBounds(feature, True, shapefile_bbox)
-    
-        # either directly download images of small meadows locally or export large ones to google drive before downloading locally
-        for i, subregion in enumerate(subregions):
-            image_name = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
-            if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
-                with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
-                    geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                    if not os.path.exists(image_name):
-                        time.sleep(1.1)
-                        with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
-                            geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                    if bandnames1 > allBands and os.path.exists(image_name):
-                        extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
-                        geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-                        if not os.path.exists(extra_image_name):
-                            time.sleep(1.1)
-                            with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
-                                geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-            if not os.path.exists(image_name):    # merge both images for g-drive download
-                if bandnames1 > allBands and residue_image is not None:
-                    total_image = combined_image.addBands(residue_image)
-                else:
-                    total_image = combined_image
-                try:
-                    geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
-                except:
-                    continue
+        imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
+        reRun = downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun)
+        if reRun:   # re-run attempt (for initial failure) to export geotiff for non-massive meadows by splitting them
+            subregions = splitMeadowBounds(feature, True, shapefile_bbox, 2)
+            reRun = downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun)
         
         return noBands + bandnames1
     except:
@@ -506,16 +511,19 @@ def processMeadow(meadowCues):
         noBands = (1024 - recurringBands) if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
+        imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
-        subregions = splitMeadowBounds(feature, False)
-    
+        subregions = len([f for f in glob.glob(f'{imagename}*') if not f.endswith("_e.tif")])
+        if subregions == 0 or feature.Area_km2 >= 5:
+            subregions = splitMeadowBounds(feature, False)
+        
         # process each image subregion and bandnames order
         for i in range(subregions):
-            image_name = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}_{i}.tif'
+            image_name = f'{imagename}_{i}.tif'
             image_names.add(image_name[17:-4])
             if totalBands > 1024:
-                extra_image_name = f'{image_name.split(".tif")[0]}_e.tif'
+                extra_image_name = f'{imagename}_{i}_e.tif'
                 image_names.add(extra_image_name[17:-4])
         
         if totalBands < 1024:
