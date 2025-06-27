@@ -214,10 +214,18 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
         if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
+                if not os.path.exists(image_name):
+                    time.sleep(1.1)
+                    with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                        geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                 if bandnames1 > allBands and os.path.exists(image_name):
                     extra_image_name = f'{imagename}_{i}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-        if not os.path.exists(image_name) or (bandnames1 > allBands and os.path.exists(image_name)):    # merge both images for g-drive download
+                    if not os.path.exists(extra_image_name):
+                        time.sleep(1.1)
+                        with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
+                            geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
+        if not os.path.exists(image_name):    # use g-drive download if conventional one fails
             if bandnames1 > allBands and residue_image is not None:
                 total_image = combined_image.addBands(residue_image)
             else:
@@ -442,7 +450,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('26/06/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('27/06/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
