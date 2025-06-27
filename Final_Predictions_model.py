@@ -206,7 +206,7 @@ def loadYearCollection(year):
     os.makedirs(f"files/bands/{year}", exist_ok=True)
 
 
-def downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun):
+def downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1):
     mycrs = feature.epsgCode
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
@@ -214,16 +214,10 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
         if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-                if not os.path.exists(image_name) and not reRun:
-                    return True
                 if bandnames1 > allBands and os.path.exists(image_name):
                     extra_image_name = f'{imagename}_{i}_e.tif'
                     geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-                    if not os.path.exists(extra_image_name):
-                        time.sleep(1.1)
-                        with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
-                            geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
-        if not os.path.exists(image_name):    # merge both images for g-drive download
+        if not os.path.exists(image_name) or (bandnames1 > allBands and os.path.exists(image_name)):    # merge both images for g-drive download
             if bandnames1 > allBands and residue_image is not None:
                 total_image = combined_image.addBands(residue_image)
             else:
@@ -232,7 +226,6 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
                 geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             except:
                 continue
-    return False
 
 
 def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilesplit=0):
@@ -449,7 +442,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('20/06/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('26/06/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -460,7 +453,7 @@ def prepareMeadows(meadowIdx):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs, reRun = int(feature.ID), feature.epsgCode, False
+        meadowId, mycrs = int(feature.ID), feature.epsgCode
         if feature.geometry.geom_type == 'Polygon':
             if feature.Area_km2 > 0.5:
                 feature.geometry = feature.geometry.simplify(0.00001)
@@ -487,10 +480,7 @@ def prepareMeadows(meadowIdx):
         combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
         subregions = splitMeadowBounds(feature, True, shapefile_bbox)
         imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
-        reRun = downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun)
-        if reRun:   # re-run attempt (for initial failure) to export geotiff for non-massive meadows by splitting them
-            subregions = splitMeadowBounds(feature, True, shapefile_bbox, 2)
-            reRun = downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1, reRun)
+        downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1)
         
         return noBands + bandnames1
     except:
