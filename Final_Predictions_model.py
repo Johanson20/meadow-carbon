@@ -349,7 +349,7 @@ def downloadFinishedTasks(image_names):
                             filename = task.status()['description']
                             isOngoing = False
                             break
-                        elif task.status()['state'] == 'FAILED':
+                        elif task.status()['state'] in ['FAILED', 'CANCELLED', 'CANCEL_REQUESTED']:
                             if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
                                 isOngoing = False
                             continue
@@ -450,7 +450,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('27/06/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('30/06/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -484,7 +484,7 @@ def prepareMeadows(meadowIdx):
         dates = [date/1000 for date in image_result['image_dates']]
         if not len(dates):
             return -1
-        # combine bands and split large meadows; then try downloading tiles as a whole or in split chunks
+        # combine bands and split large meadows
         combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
         subregions = splitMeadowBounds(feature, True, shapefile_bbox)
         imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
@@ -584,6 +584,7 @@ def processMeadow(meadowCues):
             bnpp_draws = np.random.normal(all_data['BNPP'].to_frame(), all_data['1SD_BNPP'].to_frame(), size=(len(all_data['BNPP']), 100))
             all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
             all_data['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
+            all_data[['Meadow_ID', 'Water_Year']] = meadowId, year
             
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
@@ -594,6 +595,7 @@ def processMeadow(meadowCues):
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
+                gdf.plot(column=response_col, cmap='viridis', legend=True)
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
