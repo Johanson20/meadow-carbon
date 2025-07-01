@@ -50,7 +50,7 @@ def G_driveAccess():
     drive = GoogleDrive(gauth)
 
 
-def geotiffToCsv(input_raster, bandnames):
+def geotiffToDataFrame(input_raster, bandnames):
     # creates a dataframe of unique columns (hence combines repeating band names)
     with rasterio.Env(CPL_LOG='ERROR'):
         geotiff = xr.open_rasterio(input_raster)
@@ -59,7 +59,7 @@ def geotiffToCsv(input_raster, bandnames):
     geotiff.close()
     nrows = df.shape[0]
 
-    out_csv = pd.DataFrame()
+    out_df = pd.DataFrame()
     colBands = set(df.columns)
     nBands = len(bandnames)
     
@@ -71,15 +71,15 @@ def geotiffToCsv(input_raster, bandnames):
                 values = values + list(df[band])
             else:
                 values = values + [np.nan]*nrows
-        out_csv[bandnames[col-1]] = values
+        out_df[bandnames[col-1]] = values
     
     # repeat the other columns throughout length of dataframe
-    n = int(out_csv.shape[0]/nrows)
+    n = int(out_df.shape[0]/nrows)
     for col in range((recurringBands + 1), (allBands + 1)):
-        out_csv[bandnames[col-1]] = list(df[col])*n
-    out_csv['x'] = list(df['x'])*n
-    out_csv['y'] = list(df['y'])*n
-    return out_csv
+        out_df[bandnames[col-1]] = list(df[col])*n
+    out_df['x'] = list(df['x'])*n
+    out_df['y'] = list(df['y'])*n
+    return out_df
 
 
 def processGeotiff(df):
@@ -197,6 +197,7 @@ def makePredictions(df):
     bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
     df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
     df['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
+    return df
     
 
 def maskAndRename(image):
@@ -484,10 +485,10 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('30/06/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('07/01/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
-year = 2021
+year = 2019
 loadYearCollection(year)
 
 
@@ -574,11 +575,11 @@ def processMeadow(meadowCues):
             if downloadFinishedTasks(image_names) == -3:
                 return -3   # for failure in downloading completed GEE tasks
             try:
-                image_names.remove(image_name[17:-4])
                 if image_name.endswith('e.tif'):
-                    df = geotiffToCsv(image_name, bandnames1)
+                    df = geotiffToDataFrame(image_name, bandnames1)
                 else:
-                    df = geotiffToCsv(image_name, bandnames)
+                    df = geotiffToDataFrame(image_name, bandnames)
+                image_names.remove(image_name[17:-4])
             except:
                 continue
             df = processGeotiff(df)
@@ -610,36 +611,14 @@ def processMeadow(meadowCues):
         return -4
 
 '''
-meadowIdx = 15439   # 15405 (largest), 16178 (smallest)
+meadowIdx = 15424   # 15390 (largest), 16163 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
 if __name__ == "__main__":
-    years = range(1984, 2025)
-    # run the first prepareMeadows for 5 years at a time (due to GEE limit) and display progress per year
-    for year in years[-6:-1]:   # modify the indexes
-        start = datetime.now()
-        loadYearCollection(year)
-        with multiprocessing.Pool(processes=60) as pool:
-            bandresult = pool.map(prepareMeadows, allIdx)
-        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
-            pickle.dump(bandresult, f)
-        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
-    
-    # Refresh Google drive access and earth engine initialization; load all initiated tasks
-    G_driveAccess()
-    ee.Initialize()
-    tasks = ee.batch.Task.list()
-    # run the processMeadows for 5 years at a time
-    for year in years[-6:-1]:   # modify the indexes
-        start = datetime.now()
-        loadYearCollection(year)
-        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
-            bandresult = pickle.load(f)
-        meadowData = list(zip(allIdx, bandresult))
-        tasks = [task for task in tasks if str(year) in task.config['description']]
-        with multiprocessing.Pool(processes=60) as pool:
-            result = pool.map(processMeadow, meadowData)
-        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
-            pickle.dump(result, f)
-        print(f"Year {year} completed in {datetime.now() - start}")
+    start = datetime.now()
+    with multiprocessing.Pool(processes=16) as pool:
+        bandresult = pool.map(prepareMeadows, allIdx)
+    with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+        pickle.dump(bandresult, f)
+    print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
