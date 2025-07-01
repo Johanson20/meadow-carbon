@@ -488,7 +488,7 @@ allIdx = shapefile.index
 current_time = datetime.strptime('07/01/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
-year = 2019
+year = 2021
 loadYearCollection(year)
 
 
@@ -616,9 +616,31 @@ noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
 if __name__ == "__main__":
-    start = datetime.now()
-    with multiprocessing.Pool(processes=16) as pool:
-        bandresult = pool.map(prepareMeadows, allIdx)
-    with open(f'files/{year}/bandresult.pckl', 'wb') as f:
-        pickle.dump(bandresult, f)
-    print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
+    years = range(1984, 2025)
+    # run the first prepareMeadows for 5 years at a time (due to GEE limit) and display progress per year
+    for year in years[-6:-1]:   # modify the indexes
+        start = datetime.now()
+        loadYearCollection(year)
+        with multiprocessing.Pool(processes=60) as pool:
+            bandresult = pool.map(prepareMeadows, allIdx)
+        with open(f'files/{year}/bandresult.pckl', 'wb') as f:
+            pickle.dump(bandresult, f)
+        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
+    
+    # Refresh Google drive access and earth engine initialization; load all initiated tasks
+    G_driveAccess()
+    ee.Initialize()
+    tasks = ee.batch.Task.list()
+    # run the processMeadows for 5 years at a time
+    for year in years[-6:-1]:   # modify the indexes
+        start = datetime.now()
+        loadYearCollection(year)
+        with open(f'files/{year}/bandresult.pckl', 'rb') as f:
+            bandresult = pickle.load(f)
+        meadowData = list(zip(allIdx, bandresult))
+        tasks = [task for task in tasks if str(year) in task.config['description']]
+        with multiprocessing.Pool(processes=60) as pool:
+            result = pool.map(processMeadow, meadowData)
+        with open(f'files/{year}/finalresult.pckl', 'wb') as f:
+            pickle.dump(result, f)
+        print(f"Year {year} completed in {datetime.now() - start}")
