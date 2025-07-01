@@ -6,7 +6,6 @@ Created on Mon Apr 22 11:03:25 2024
 """
 
 import os
-import glob
 import time
 import numpy as np
 import pickle
@@ -15,6 +14,7 @@ import pandas as pd
 import geopandas as gpd
 import multiprocessing
 import contextlib
+import rasterio
 import rioxarray as xr
 import ee
 import geemap
@@ -52,7 +52,8 @@ def G_driveAccess():
 
 def geotiffToCsv(input_raster, bandnames):
     # creates a dataframe of unique columns (hence combines repeating band names)
-    geotiff = xr.open_rasterio(input_raster)
+    with rasterio.Env(CPL_LOG='ERROR'):
+        geotiff = xr.open_rasterio(input_raster)
     df = geotiff.to_dataframe(name='value').reset_index()
     df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
     geotiff.close()
@@ -164,6 +165,39 @@ def interpolate_group(group):
     group.drop((cols[:6] + cols[-7:] + ['Month', 'dNDSI', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
     return group.head(1)
 
+
+def makePredictions(df):
+    # select relevant columns, predict GHG and interpolate daily values
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, ghg_col])
+    sd_ghg = ghg_84_model.predict(df.loc[:, ghg_sd_col])
+    df['1SD_CO2'] = abs(sd_ghg - df['CO2.umol.m2.s'])
+    df.loc[df['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
+    df = df.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
+    rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
+
+    # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
+    df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
+    df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
+    sd_agb = agb_84_model.predict(df.loc[:, agb_sd_col])
+    df['1SD_ANPP'] = abs(sd_agb - df['HerbBio.g.m2'])
+    sd_bgb = bgb_84_model.predict(df.loc[:, bgb_sd_col])
+    bgb_sd = abs(sd_bgb - df['Roots.kg.m2'])
+    df.loc[df['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+    df.loc[df['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+    df['Root_Turnover'] = (df['Roots.kg.m2']*0.49 - ((df['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
+    df['Root_Exudates'] = df['Roots.kg.m2']*1000*df['Active_growth_days']*12*1.04e-4
+    df['BNPP'] = df['Root_Turnover'] + df['Root_Exudates']
+    df['ANPP'] = df['HerbBio.g.m2']*0.433
+    df['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*df['Active_growth_days']*12*0.104
+    anpp_draws = np.random.normal(df['ANPP'].to_frame(), df['1SD_ANPP'].to_frame(), size=(len(df['ANPP']), 100))
+    bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
+    df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
+    df['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
+    
 
 def maskAndRename(image):
     # rename bands and mask out cloud based on bits in QA_pixel; then scale values
@@ -509,19 +543,18 @@ def processMeadow(meadowCues):
         noBands = (1024 - recurringBands) if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
-        imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
+        inputname = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
+        outputname = f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
-        subregions = len([f for f in glob.glob(f'{imagename}*') if not f.endswith("_e.tif")])
-        if subregions == 0 or feature.Area_km2 >= 5:
-            subregions = splitMeadowBounds(feature, False)
+        subregions = splitMeadowBounds(feature, False)
         
         # process each image subregion and bandnames order
         for i in range(subregions):
-            image_name = f'{imagename}_{i}.tif'
+            image_name = f'{inputname}_{i}.tif'
             image_names.add(image_name[17:-4])
             if totalBands > 1024:
-                extra_image_name = f'{imagename}_{i}_e.tif'
+                extra_image_name = f'{inputname}_{i}_e.tif'
                 image_names.add(extra_image_name[17:-4])
         
         if totalBands < 1024:
@@ -553,52 +586,22 @@ def processMeadow(meadowCues):
             df = pd.DataFrame()
         all_data.head()
         
-        if not all_data.empty:
-            # select relevant columns, predict GHG and interpolate daily values
-            all_data.replace([np.inf, -np.inf], np.nan, inplace=True)
-            all_data.dropna(inplace=True)
-            all_data.drop_duplicates(inplace=True)
-            all_data.reset_index(drop=True, inplace=True)
-            all_data['CO2.umol.m2.s'] = ghg_model.predict(all_data.loc[:, ghg_col])
-            sd_ghg = ghg_84_model.predict(all_data.loc[:, ghg_sd_col])
-            all_data['1SD_CO2'] = abs(sd_ghg - all_data['CO2.umol.m2.s'])
-            all_data.loc[all_data['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
-            all_data = all_data.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
-            rh_draws = np.random.normal(all_data['Rh'].to_frame(), all_data['1SD_Rh'].to_frame(), size=(len(all_data['Rh']), 100))
-    
-            # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
-            all_data['HerbBio.g.m2'] = agb_model.predict(all_data.loc[:, agb_col])
-            all_data['Roots.kg.m2'] = bgb_model.predict(all_data.loc[:, bgb_col])
-            sd_agb = agb_84_model.predict(all_data.loc[:, agb_sd_col])
-            all_data['1SD_ANPP'] = abs(sd_agb - all_data['HerbBio.g.m2'])
-            sd_bgb = bgb_84_model.predict(all_data.loc[:, bgb_sd_col])
-            bgb_sd = abs(sd_bgb - all_data['Roots.kg.m2'])
-            all_data.loc[all_data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
-            all_data.loc[all_data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-            all_data['Root_Turnover'] = (all_data['Roots.kg.m2']*0.49 - ((all_data['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
-            all_data['Root_Exudates'] = all_data['Roots.kg.m2']*1000*all_data['Active_growth_days']*12*1.04e-4
-            all_data['BNPP'] = all_data['Root_Turnover'] + all_data['Root_Exudates']
-            all_data['ANPP'] = all_data['HerbBio.g.m2']*0.433
-            all_data['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*all_data['Active_growth_days']*12*0.104
-            anpp_draws = np.random.normal(all_data['ANPP'].to_frame(), all_data['1SD_ANPP'].to_frame(), size=(len(all_data['ANPP']), 100))
-            bnpp_draws = np.random.normal(all_data['BNPP'].to_frame(), all_data['1SD_BNPP'].to_frame(), size=(len(all_data['BNPP']), 100))
-            all_data['NEP'] = all_data['ANPP'] + all_data['BNPP'] - all_data['Rh']
-            all_data['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
+        if not all_data.empty and not os.path.exists(f'{outputname}.csv'):
+            all_data = makePredictions(all_data)
             all_data[['Meadow_ID', 'Water_Year']] = meadowId, year
-            
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
             out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh'], ['1SD_NEP.tif', '1SD_NEP']]
             for i in range(8):
-                out_raster = f'files/{year}/Image_meadow_{year}_{meadowId}_{meadowIdx}_{out_rasters[i][0]}'
+                out_raster = f'{outputname}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
                 gdf.plot(column=response_col, cmap='viridis', legend=True)
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
-            all_data.to_csv(f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}.csv', index=False)
+            all_data.to_csv(f'{outputname}.csv', index=False)
         else:
             meadowIdx = -2  # if all_data is an empty dataframe
         

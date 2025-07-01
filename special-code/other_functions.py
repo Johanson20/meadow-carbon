@@ -10,6 +10,7 @@ import glob
 import pandas as pd
 import geopandas as gpd
 import rioxarray as xr
+import rasterio
 import contextlib
 import ee
 import geemap
@@ -74,7 +75,7 @@ def downloadBands(banded_image, image_name, region, mycrs, scale=30):
 
 def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4326):
     '''
-    Convert geotiff to raster and make coordinates in latlon from projected, supply epsg code of projection
+    Convert geotiff to csv and make coordinates in latlon from projected, supply epsg code of projection
     '''
     geotiff = gdal.Open(input_raster)
     nBands = geotiff.RasterCount
@@ -176,7 +177,8 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
             # distinguish between meadows in different EPSG zones
             if int(file.split("_")[-2]) not in shps_to_use:
                 continue
-            geotiff = xr.open_rasterio(file)
+            with rasterio.Env(CPL_LOG='ERROR'):
+                geotiff = xr.open_rasterio(file)
             df = geotiff.to_dataframe(name='value').reset_index()
             df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
             df.columns = ['Y', 'X', variable]
@@ -202,6 +204,6 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     out_grd = out_grd.rio.reproject(epsg_crs)
     out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("files/2023", "files/merged_ANPP.tif", ".csv", "ANPP",)
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone10.tif", "NEP.tif")
+# mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv", "BNPP")
+# mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", "NEP", 32611)
