@@ -485,7 +485,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('07/01/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('07/02/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -549,6 +549,8 @@ def processMeadow(meadowCues):
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = splitMeadowBounds(feature, False)
+        if os.path.exists(f'{outputname}.csv'):
+            return meadowIdx
         
         # process each image subregion and bandnames order
         for i in range(subregions):
@@ -575,11 +577,11 @@ def processMeadow(meadowCues):
             if downloadFinishedTasks(image_names) == -3:
                 return -3   # for failure in downloading completed GEE tasks
             try:
+                image_names.remove(image_name[17:-4])
                 if image_name.endswith('e.tif'):
                     df = geotiffToDataFrame(image_name, bandnames1)
                 else:
                     df = geotiffToDataFrame(image_name, bandnames)
-                image_names.remove(image_name[17:-4])
             except:
                 continue
             df = processGeotiff(df)
@@ -587,7 +589,7 @@ def processMeadow(meadowCues):
             df = pd.DataFrame()
         all_data.head()
         
-        if not all_data.empty and not os.path.exists(f'{outputname}.csv'):
+        if not all_data.empty:
             all_data = makePredictions(all_data)
             all_data[['Meadow_ID', 'Water_Year']] = meadowId, year
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
