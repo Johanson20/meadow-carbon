@@ -150,8 +150,6 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg_crs)
 allIdx = shapefile.copy()
-shapefile = None
-shapefile = allIdx.copy()
 # identify each meadow as UTM Zone 10 or 11
 shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
@@ -160,23 +158,24 @@ shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
 allIdx = None
 
 
-def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, res=30):
+def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, SD_only=False, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
-    all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
+    if not SD_only:
+        all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
+    else:
+        all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if f.endswith(f"1SD_{endname}")]
+    relevant_files = []
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     # extract indexes of the meadows of a distinct UTM zone
     shps_to_use = shapefile[shapefile['epsgCode'] == "EPSG:" + str(zone)].index
     
     if endname.endswith(".tif"):
-        # write to a vrt file
-        vrt_path = f'{inputdir}/{variable}_Zone{str(zone)[-2:]}.vrt'
-        vrt = gdal.BuildVRT(vrt_path, all_files)
-        vrt.FlushCache()
-        vrt = None
         for file in all_files:
+            meadowIdx = int(file.split("_")[-3]) if SD_only else int(file.split("_")[-2])
             # distinguish between meadows in different EPSG zones
-            if int(file.split("_")[-2]) not in shps_to_use:
+            if meadowIdx not in shps_to_use:
                 continue
+            relevant_files.append(file)
             with rasterio.Env(CPL_LOG='ERROR'):
                 geotiff = xr.open_rasterio(file)
             df = geotiff.to_dataframe(name='value').reset_index()
@@ -184,6 +183,11 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
             df.columns = ['Y', 'X', variable]
             geotiff.close()
             all_data = pd.concat([all_data, df])
+        # write to a vrt file
+        vrt_path = f'{inputdir}/{variable}_Zone{str(zone)[-2:]}.vrt'
+        vrt = gdal.BuildVRT(vrt_path, relevant_files)
+        vrt.FlushCache()
+        vrt = None
     elif endname.endswith(".csv"):
         for file in all_files:
             if int(file.split("_")[-2]) not in shps_to_use:
@@ -206,4 +210,4 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
 
 # mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv", "BNPP")
 # mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", "NEP", 32611)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", "NEP", 32611, True)
