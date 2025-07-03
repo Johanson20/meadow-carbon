@@ -143,18 +143,23 @@ def interpolate_group(group):
     group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
     group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
     
-    # non-snow covered days
-    integrals = group[group.NDSI <= 0.2]
-    integrals['NDVI_Ratio'] = (integrals['NDVI'] - min(integrals['NDVI']))/(max(integrals['NDVI']) - min(integrals['NDVI']))
-    # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
-    group['Active_growth_days'] = sum(integrals.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(integrals.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(integrals.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
-    # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
-    group['Snow_days'] = len(date_range) - integrals.shape[0]
-    group['Wet_days'] = integrals[integrals.NDWI > 0.5].shape[0]
-    integrals = integrals[(integrals.NDWI <= 0.5) & (integrals.NDVI >= 0.2)]
-    integrals = integrals[cols[:6] + cols[-7:]].sum()
-    for integral in integrals.keys():
-        group['d'+integral] = integrals[integral]
+    try:
+        # non-snow covered days
+        growth_period = group[group.NDSI <= 0.2]
+        growth_period['NDVI_Ratio'] = (growth_period['NDVI'] - min(growth_period['NDVI']))/(max(growth_period['NDVI']) - min(growth_period['NDVI']))
+        # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
+        group['Active_growth_days'] = sum(growth_period.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(growth_period.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(growth_period.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
+        # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
+        group['Snow_days'] = len(date_range) - growth_period.shape[0]
+        group['Wet_days'] = growth_period[growth_period.NDWI > 0.5].shape[0]
+        integrals = growth_period[(growth_period.NDWI <= 0.5) & (growth_period.NDVI >= 0.2)]
+        integrals = integrals[cols[:6] + cols[-7:]].sum()
+        for integral in integrals.keys():
+            group['d'+integral] = integrals[integral]
+    except:
+        group.loc[:, ['Active_growth_days', 'Snow_days', 'Wet_days']] = 0
+        for integral in (cols[:6] + cols[-7:]):
+            group['d'+integral] = 0
     # actively growing vegetation is when NDVI >= 0.2
     resp = group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']]
     resp = resp - 0.367*resp - (resp - 0.367*resp)*0.094
@@ -549,14 +554,12 @@ def processMeadow(meadowCues):
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = splitMeadowBounds(feature, False)
-        if os.path.exists(f'{outputname}.csv'):
-            return meadowIdx
         
         # process each image subregion and bandnames order
         for i in range(subregions):
             image_name = f'{inputname}_{i}.tif'
             image_names.add(image_name[17:-4])
-            if totalBands > 1024:
+            if totalBands > 1024 and feature.Area_km2 < 5:
                 extra_image_name = f'{inputname}_{i}_e.tif'
                 image_names.add(extra_image_name[17:-4])
         
@@ -572,6 +575,8 @@ def processMeadow(meadowCues):
                 bandnames1 = bandnames1.copy() + bandnames1[:recurringBands]
                 noBands1 -= recurringBands
         
+        if os.path.exists(f'{outputname}.csv'):
+            return meadowIdx
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
             if downloadFinishedTasks(image_names) == -3:

@@ -158,13 +158,14 @@ shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
 allIdx = None
 
 
-def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610, SD_only=False, res=30):
+def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, SD_only=False, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
     if not SD_only:
         all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
     else:
         all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if f.endswith(f"1SD_{endname}")]
     relevant_files = []
+    variable = endname.split(".tif")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     # extract indexes of the meadows of a distinct UTM zone
     shps_to_use = shapefile[shapefile['epsgCode'] == "EPSG:" + str(zone)].index
@@ -176,13 +177,14 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
             if meadowIdx not in shps_to_use:
                 continue
             relevant_files.append(file)
-            with rasterio.Env(CPL_LOG='ERROR'):
-                geotiff = xr.open_rasterio(file)
-            df = geotiff.to_dataframe(name='value').reset_index()
-            df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
-            df.columns = ['Y', 'X', variable]
-            geotiff.close()
-            all_data = pd.concat([all_data, df])
+            if not vrt_only:    # read all geotiffs
+                with rasterio.Env(CPL_LOG='ERROR'):
+                    geotiff = xr.open_rasterio(file)
+                df = geotiff.to_dataframe(name='value').reset_index()
+                df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+                df.columns = ['Y', 'X', variable]
+                geotiff.close()
+                all_data = pd.concat([all_data, df])
         # write to a vrt file
         vrt_path = f'{inputdir}/{variable}_Zone{str(zone)[-2:]}.vrt'
         vrt = gdal.BuildVRT(vrt_path, relevant_files)
@@ -198,16 +200,17 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, variable="NEP", zone=32610,
     else:
         return
     
-    # create a geodataframe and then raster for the single column of interest (variable) as the pixel value
-    all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
-    utm_lons, utm_lats = all_data['X'], all_data['Y']
-    pixel_values = all_data[variable]
-    
-    gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone)
-    out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
-    out_grd = out_grd.rio.reproject(epsg_crs)
-    out_grd.rio.to_raster(outfile)
+    if not vrt_only:    # merge the geotiffs to a single image
+        # create a geodataframe and then raster for the single column of interest (variable) as the pixel value
+        all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
+        utm_lons, utm_lats = all_data['X'], all_data['Y']
+        pixel_values = all_data[variable]
+        
+        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone)
+        out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
+        out_grd = out_grd.rio.reproject(epsg_crs)
+        out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv", "BNPP")
+# mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv")
 # mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", "NEP", 32611, True)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", True, 32611, True)
