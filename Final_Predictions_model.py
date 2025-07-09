@@ -429,7 +429,7 @@ ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(
 
 # read in shapefile, landsat and flow accumulation data and convert shapefile to WGS '84
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-07-09.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
 allIdx = shapefile.copy()
 shapefile = None
@@ -488,18 +488,18 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIdx = shapefile.index
-current_time = datetime.strptime('07/02/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('07/09/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
 loadYearCollection(year)
 
 
-def prepareMeadows(meadowIdx):
+def prepareMeadows(meadowId):
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
-        feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = int(feature.ID), feature.epsgCode
+        feature = shapefile[shapefile.ID == meadowId].iloc[0]
+        mycrs = feature.epsgCode
         if feature.geometry.geom_type == 'Polygon':
             if feature.Area_km2 > 0.5:
                 feature.geometry = feature.geometry.simplify(0.00001)
@@ -525,7 +525,7 @@ def prepareMeadows(meadowIdx):
         # combine bands and split large meadows
         combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
         subregions = splitMeadowBounds(feature, True, shapefile_bbox)
-        imagename = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
+        imagename = f'files/bands/{year}/meadow_{year}_{meadowId}'
         downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1)
         
         return noBands + bandnames1
@@ -535,11 +535,11 @@ def prepareMeadows(meadowIdx):
 
 def processMeadow(meadowCues):
     try:
-        meadowIdx, totalBands = meadowCues
+        meadowId, totalBands = meadowCues
         if totalBands <= allBands:
             return -1   # if no GEE data is available for the meadow's buffer
-        feature = shapefile.loc[meadowIdx, :]
-        meadowId, mycrs = int(feature.ID), feature.epsgCode
+        feature = shapefile[shapefile.ID == meadowId].iloc[0]
+        mycrs = feature.epsgCode
             
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
@@ -547,8 +547,8 @@ def processMeadow(meadowCues):
         noBands = (1024 - recurringBands) if totalBands > 1024 else totalBands
         noBands1 = totalBands - noBands
         image_names = set()
-        inputname = f'files/bands/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
-        outputname = f'files/{year}/meadow_{year}_{meadowId}_{meadowIdx}'
+        inputname = f'files/bands/{year}/meadow_{year}_{meadowId}'
+        outputname = f'files/{year}/meadow_{year}_{meadowId}'
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = splitMeadowBounds(feature, False)
@@ -574,7 +574,7 @@ def processMeadow(meadowCues):
                 noBands1 -= recurringBands
         
         if os.path.exists(f'{outputname}.csv'):
-            return meadowIdx
+            return meadowId
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
             if downloadFinishedTasks(image_names) == -3:
@@ -609,16 +609,16 @@ def processMeadow(meadowCues):
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'{outputname}.csv', index=False)
         else:
-            meadowIdx = -2  # if all_data is an empty dataframe
+            meadowId = -2  # if all_data is an empty dataframe
         
-        return meadowIdx
+        return meadowId
     except:
         return -4
 
 '''
-meadowIdx = 15424   # 15390 (largest), 16163 (smallest)
-noBands = prepareMeadows(meadowIdx)
-processMeadow((meadowIdx, noBands))
+meadowId = 15508   # 15474 (largest), 16247 (smallest)
+noBands = prepareMeadows(meadowId)
+processMeadow((meadowId, noBands))
 '''
 if __name__ == "__main__":
     years = range(1984, 2025)
