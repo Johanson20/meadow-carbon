@@ -149,13 +149,11 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2025-06-17.shp").to_crs(epsg_crs)
-allIdx = shapefile.copy()
 # identify each meadow as UTM Zone 10 or 11
 shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
-allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
-shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
-allIdx = None
+allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
+shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
 
 
 def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, SD_only=False, res=30):

@@ -431,13 +431,10 @@ ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2025-07-09.shp").to_crs(epsg_crs)
 # file handles need to be closed for serialization of parallel processes
-allIdx = shapefile.copy()
-shapefile = None
-shapefile = allIdx.copy()
 shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
-allIdx = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
-shapefile.loc[shapefile['ID'].isin(allIdx), 'epsgCode'] = "EPSG:32610"
+allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
+shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
 # add a buffer of 100m to Sierra Nevada
 minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
@@ -487,7 +484,7 @@ snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zo
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
-allIdx = shapefile.index
+allIds = shapefile.ID
 current_time = datetime.strptime('07/09/2025', '%d/%m/%Y').timestamp()*1000
 
 # re-run this part for each unique year
@@ -627,7 +624,7 @@ if __name__ == "__main__":
         start = datetime.now()
         loadYearCollection(year)
         with multiprocessing.Pool(processes=60) as pool:
-            bandresult = pool.map(prepareMeadows, allIdx)
+            bandresult = pool.map(prepareMeadows, allIds)
         with open(f'files/{year}/bandresult.pckl', 'wb') as f:
             pickle.dump(bandresult, f)
         print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
@@ -642,10 +639,12 @@ if __name__ == "__main__":
         loadYearCollection(year)
         with open(f'files/{year}/bandresult.pckl', 'rb') as f:
             bandresult = pickle.load(f)
-        meadowData = list(zip(allIdx, bandresult))
+        meadowData = list(zip(allIds, bandresult))
         tasks = [task for task in tasks if str(year) in task.config['description']]
         with multiprocessing.Pool(processes=60) as pool:
             result = pool.map(processMeadow, meadowData)
         with open(f'files/{year}/finalresult.pckl', 'wb') as f:
             pickle.dump(result, f)
         print(f"Year {year} completed in {datetime.now() - start}")
+    
+    shapefile = None
