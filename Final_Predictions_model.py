@@ -392,7 +392,7 @@ def downloadFinishedTasks(image_names):
                                 isOngoing = False
                             continue
                         else:
-                            time.sleep(2/len(taskImages))
+                            time.sleep(len(taskImages)/2)
                 if not newtasks:
                     isOngoing = False
             if filename:    # load all files matching the filename from google drive)
@@ -485,7 +485,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIds = shapefile.ID
-current_time = datetime.strptime('07/09/2025', '%d/%m/%Y').timestamp()*1000
+current_time = datetime.strptime('07/09/2025', '%m/%d/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
