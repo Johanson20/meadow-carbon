@@ -610,6 +610,7 @@ def processMeadow(meadowCues):
         
         return meadowId
     except:
+        print(f"Meadow {meadowId} threw an exception!")
         return -4
 
 '''
