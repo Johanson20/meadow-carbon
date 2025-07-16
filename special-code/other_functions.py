@@ -12,6 +12,7 @@ import geopandas as gpd
 import rioxarray as xr
 import rasterio
 import contextlib
+import warnings
 import ee
 import geemap
 from shapely.geometry import Polygon
@@ -20,6 +21,8 @@ from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 from geocube.api.core import make_geocube
 
+warnings.filterwarnings("ignore")
+gdal.SetConfigOption("GTIFF_SRS_SOURCE", "EPSG")
 os.chdir("Code")    # change path to where github code is pulled from
 
 
@@ -156,24 +159,17 @@ allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
 
 
-def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, SD_only=False, res=30):
+def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
-    if not SD_only:
-        all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
-    else:
-        all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if f.endswith(f"1SD_{endname}")]
+    all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
     relevant_files = []
     variable = endname.split(".tif")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     # extract indexes of the meadows of a distinct UTM zone
-    shps_to_use = shapefile[shapefile['epsgCode'] == "EPSG:" + str(zone)].index
+    shps_to_use = shapefile[shapefile['epsgCode'] == ("EPSG:" + str(zone))].index
     
     if endname.endswith(".tif"):
         for file in all_files:
-            meadowIdx = int(file.split("_")[-3]) if SD_only else int(file.split("_")[-2])
-            # distinguish between meadows in different EPSG zones
-            if meadowIdx not in shps_to_use:
-                continue
             relevant_files.append(file)
             if not vrt_only:    # read all geotiffs
                 with rasterio.Env(CPL_LOG='ERROR'):
@@ -184,12 +180,14 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, 
                 geotiff.close()
                 all_data = pd.concat([all_data, df])
         # write to a vrt file
-        vrt_path = f'{inputdir}/{variable}_Zone{str(zone)[-2:]}.vrt'
-        vrt = gdal.BuildVRT(vrt_path, relevant_files)
-        vrt.FlushCache()
-        vrt = None
+        vrt_path = f'{inputdir}/{variable}.vrt'
+        if not os.path.exists(vrt_path):
+            vrt = gdal.BuildVRT(vrt_path, relevant_files)
+            vrt.FlushCache()
+            vrt = None
     elif endname.endswith(".csv"):
         for file in all_files:
+            # distinguish between meadows in different EPSG zones
             if int(file.split("_")[-2]) not in shps_to_use:
                 continue
             df = pd.read_csv(file)
@@ -211,4 +209,5 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, 
 
 # mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv")
 # mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "NEP.tif", True, 32611, True)
+# mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
+# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
