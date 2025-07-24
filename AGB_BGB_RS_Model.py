@@ -402,12 +402,22 @@ data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
-# make scatter plots of relevant variables from raw dataframe
+# make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
 with PdfPages('files/BGB_Scatter_plots.pdf') as pdf:
-    for feature in var_col:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
-        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+    for i in range(0, len(var_col), 9):
+        # Get up to 9 features for this page
+        page_features = var_col[i:i+9]
+        # Create 3x3 subplots
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()  # Flatten to 1D array for easy indexing
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+            ax.set_title(f'{feature} vs {y_field}', fontsize=10)
+        # Hide unused subplots if fewer than 9 features on last page
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -449,12 +459,20 @@ bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning
 
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
-# Make partial dependence plots
+# Make partial dependence plots (3 by 3 per page)
 with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
-    for i in range(len(var_col)):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        PartialDependenceDisplay.from_estimator(bgb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
-        ax.set_title(f'Partial Dependence of {var_col[i]}')
+    for i in range(0, len(var_col), 9):
+        page_features = var_col[i:i+9]
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            PartialDependenceDisplay.from_estimator(bgb_model, data[var_col], [feature], random_state=10, ax=ax)
+            ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
+        # Remove unused axes
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 with PdfPages('files/BGB_1_1_plot.pdf') as pdf:
@@ -575,12 +593,22 @@ data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
-# make scatter plots of relevant variables from raw dataframe
+# make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
 with PdfPages('files/AGB_Scatter_plots.pdf') as pdf:
-    for feature in var_col:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
-        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+    for i in range(0, len(var_col), 9):
+        # Get up to 9 features for this page
+        page_features = var_col[i:i+9]
+        # Create 3x3 subplots
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()  # Flatten to 1D array for easy indexing
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+            ax.set_title(f'{feature} vs {y_field}', fontsize=10)
+        # Hide unused subplots if fewer than 9 features on last page
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -611,12 +639,20 @@ agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.13, al
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
-# Make partial dependence plots
+# Make partial dependence plots (3 by 3 per page)
 with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
-    for i in range(len(var_col)):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        PartialDependenceDisplay.from_estimator(agb_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
-        ax.set_title(f'Partial Dependence of {var_col[i]}')
+    for i in range(0, len(var_col), 9):
+        page_features = var_col[i:i+9]
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            PartialDependenceDisplay.from_estimator(agb_model, data[var_col], [feature], random_state=10, ax=ax)
+            ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
+        # Remove unused axes
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 with PdfPages('files/AGB_1_1_plot.pdf') as pdf:
