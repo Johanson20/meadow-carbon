@@ -600,8 +600,9 @@ def processMeadow(meadowCues):
                 out_raster = f'{outputname}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
-                gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1])
+                gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs.split(":")[1]).to_crs(epsg_crs)
                 gdf.plot(column=response_col, cmap='viridis', legend=True)
+                gdf['X'], gdf['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd.rio.to_raster(out_raster)
             all_data.to_csv(f'{outputname}.csv', index=False)

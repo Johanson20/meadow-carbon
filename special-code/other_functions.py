@@ -158,20 +158,20 @@ utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
 
-
-def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
+def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
     all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
     relevant_files = []
-    variable = endname.split(".tif")[0]
+    variable = endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
-    # extract indexes of the meadows of a distinct UTM zone
-    shps_to_use = shapefile[shapefile['epsgCode'] == ("EPSG:" + str(zone))].index
     
     if endname.endswith(".tif"):
         for file in all_files:
             relevant_files.append(file)
             if not vrt_only:    # read all geotiffs
+                # distinguish between meadows in different EPSG zones
+                if int(file.split("_")[2]) not in allIds:
+                    continue
                 with rasterio.Env(CPL_LOG='ERROR'):
                     geotiff = xr.open_rasterio(file)
                 df = geotiff.to_dataframe(name='value').reset_index()
@@ -186,13 +186,16 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, 
             vrt.FlushCache()
             vrt = None
     elif endname.endswith(".csv"):
+        all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
         for file in all_files:
-            # distinguish between meadows in different EPSG zones
-            if int(file.split("_")[-2]) not in shps_to_use:
-                continue
+            zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df = pd.read_csv(file)
             df = df.loc[:, ['Y', 'X', variable]]
+            gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+            df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
+        all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
+        all_data.to_csv(outfile, index=False)
     else:
         return
     
@@ -207,7 +210,7 @@ def mergeToSingleGeotiff(inputdir, outfile, endname, vrt_only=True, zone=32610, 
         out_grd = out_grd.rio.reproject(epsg_crs)
         out_grd.rio.to_raster(outfile)
 
-# mergeToSingleGeotiff("files/2023", "files/merged_BNPP.tif", ".csv")
-# mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
-# mergeToSingleGeotiff("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
-# mergeToSingleGeotiff("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
+# mergeToSingleFile("files/2023", "files/merged_BNPP.csv", "NEP.csv")
+# mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
+# mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
+# mergeToSingleFile("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
