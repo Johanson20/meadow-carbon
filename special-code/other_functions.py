@@ -153,10 +153,8 @@ def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfW
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("files/AllPossibleMeadows_2025-07-09.shp").to_crs(epsg_crs)
 # identify each meadow as UTM Zone 10 or 11
-shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
-shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
 
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
@@ -170,14 +168,15 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             relevant_files.append(file)
             if not vrt_only:    # read all geotiffs
                 # distinguish between meadows in different EPSG zones
-                if int(file.split("_")[2]) not in allIds:
-                    continue
+                zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
                 with rasterio.Env(CPL_LOG='ERROR'):
                     geotiff = xr.open_rasterio(file)
                 df = geotiff.to_dataframe(name='value').reset_index()
                 df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
-                df.columns = ['Y', 'X', variable]
                 geotiff.close()
+                df.columns = ['Y', 'X', variable]
+                gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+                df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
                 all_data = pd.concat([all_data, df])
         # write to a vrt file
         vrt_path = f'{inputdir}/{variable}.vrt'
@@ -205,10 +204,11 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         utm_lons, utm_lats = all_data['X'], all_data['Y']
         pixel_values = all_data[variable]
         
-        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone)
+        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
         out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
         out_grd = out_grd.rio.reproject(epsg_crs)
-        out_grd.rio.to_raster(outfile)
+        out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
+        out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
 
 # mergeToSingleFile("files/2023", "files/merged_BNPP.csv", "NEP.csv")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
