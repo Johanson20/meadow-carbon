@@ -6,6 +6,7 @@ Created on Tue Aug 20 15:45:06 2024
 """
 
 import os
+import ast
 import glob
 import pandas as pd
 import geopandas as gpd
@@ -157,13 +158,14 @@ utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
-    '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone into one file (geotiff or csv)'''
-    all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
-    relevant_files = []
+    '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
+    into one file (geotiff, vrt and/or csv)'''
     variable = endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     
     if endname.endswith(".tif"):
+        all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
+        relevant_files = []
         for file in all_files:
             relevant_files.append(file)
             if not vrt_only:    # read all geotiffs
@@ -185,11 +187,14 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             vrt.FlushCache()
             vrt = None
     elif endname.endswith(".csv"):
+        if "," in variable:
+            mycols = ast.literal_eval(variable)
+            all_data = all_data = pd.DataFrame(columns=['Y', 'X'] + mycols)
         all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
         for file in all_files:
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df = pd.read_csv(file)
-            df = df.loc[:, ['Y', 'X', variable]]
+            df = df.loc[:, (['Y', 'X'] + mycols)] if "," in variable else df.loc[:, ['Y', 'X', variable]]
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
@@ -211,6 +216,28 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
 
 # mergeToSingleFile("files/2023", "files/merged_BNPP.csv", "NEP.csv")
+# mergeToSingleFile("files/2021", "files/2021_Zone10.csv", "['NEP','ANPP','BNPP',Rh'].csv")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
 # mergeToSingleFile("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
+
+
+def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
+    '''This function splits a csv file of X and Y columns alongside other variables into separate geotiffs 
+    with a column represented as its own geotiff as a bandc'''
+    df = pd.read_csv(inputdir)
+    utm_lons, utm_lats = df['X'], df['Y']
+    if not attributes:
+        attributes = list(df.columns[2:])   # assumption is first 2 columns of csv are spatial coordinates
+    gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone).to_crs(3310)
+    mycrs = "EPSG:" + str(zone)
+    
+    for attribute in attributes:
+        gdf[attribute] = df[attribute]
+        out_grd = make_geocube(vector_data=gdf, measurements=[attribute], resolution=(-res, res))
+        out_grd = out_grd.rio.reproject(mycrs)
+        out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
+        out_grd.rio.to_raster((inputdir[:11] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
+        print(attribute, "done!")
+
+# mergeToSingleFile("files/2021_Zone10.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
