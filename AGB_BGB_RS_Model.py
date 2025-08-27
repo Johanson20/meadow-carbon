@@ -381,7 +381,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[11:]) if c not in ['dNDSI', 'Cdef', 'AET', 'Flow', 'Wet_days', 'Lithology', 'EVI_Sept', 'NDWI_Sept', 'Shallow_Clay', 'EVI_June', 'dNDWI', 'dEVI', 'dRed', 'NDPI_June', 'SAVI_June', 'dSWIR_2', 'dNDVI']]
+var_col = [c for c in list(cols[11:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Wet_days', 'Lithology', 'NDWI_Sept', 'Deep_Clay']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -442,7 +442,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=6, n_estimators=75, subsample=0.4, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=13, n_estimators=125, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
@@ -577,7 +577,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in list(cols[18:-9]) + ['SRad'] if c not in ['dNDSI', 'AET', 'SWE', 'Wet_days', 'Cdef', 'Flow']]  # for the 5-year averaged data
+var_col =  [c for c in list(cols[18:-9]) + ['SRad'] if c not in ['dNDSI', 'Minimum_temperature', 'Wet_days', 'Cdef', 'Flow']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -632,7 +632,7 @@ train_data['AGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=14, n_estimators=50, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.13, alpha=0.8413, max_depth=13, 
                                       n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
