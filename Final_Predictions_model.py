@@ -375,6 +375,7 @@ def downloadFinishedTasks(image_names):
         tasks = ee.batch.Task.list()
     taskImages = image_names.copy()
     while taskImages:    # read in each downloaded image, process and stack them into a dataframe
+        folder_id = ""
         image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in taskImages][0]
         # check that the image isn't already downloaded and it isn't a residue image (which won't be in G_drive)
         if not os.path.exists(image_name) and not image_name.endswith('e.tif'):
@@ -390,6 +391,7 @@ def downloadFinishedTasks(image_names):
                         if task.status()['state'] == 'COMPLETED':
                             filename = task.status()['description']
                             isOngoing = False
+                            folder_id = task.status()['destination_uris'][0].split("/")[-1]
                             break
                         elif task.status()['state'] in ['FAILED', 'CANCELLED', 'CANCEL_REQUESTED']:
                             if t_k == len(tasks) - 1:   # in case a failed task is resubmitted (it loops to the other)
@@ -635,10 +637,7 @@ if __name__ == "__main__":
             pickle.dump(bandresult, f)
         print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
     
-    # Refresh Google drive access and earth engine initialization; load all initiated tasks
-    G_driveAccess()
-    ee.Initialize()
-    tasks = ee.batch.Task.list()
+    tasks = ee.batch.Task.list()    # load all initiated tasks
     # run the processMeadows for 5 years at a time
     for year in years[-6:-1]:   # modify the indexes
         start = datetime.now()
