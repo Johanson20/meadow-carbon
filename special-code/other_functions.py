@@ -241,3 +241,39 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
         print(attribute, "done!")
 
 # mergeToSingleFile("files/2021_Zone10.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
+
+
+# this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
+def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
+    gauth = GoogleAuth()
+    gauth.LoadCredentialsFile("mycreds.txt")
+    if gauth.credentials is None:   # Authenticate if there are no valid credentials
+        gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
+    elif gauth.access_token_expired:    # Refresh the credentials if they are expired
+        gauth.Refresh()
+    else:   # Load the existing credentials
+        gauth.Authorize()
+    # Save the credentials for the next run
+    gauth.SaveCredentialsFile("mycreds.txt")
+    drive = GoogleDrive(gauth)
+    
+    # list all folders with same name and extract file details to download
+    folders = drive.ListFile({'q': "mimeType='application/vnd.google-apps.folder' and title='files' and trashed=false"}).GetList()
+    for folder in folders:
+        folder_id = folder['id']
+        query = f"'{folder_id}' in parents and trashed=false and title contains '{nameId}'"
+        file_list = drive.ListFile({'q': query}).GetList()
+
+        for f in file_list:     # download the files
+            filename = f['title']
+            f.GetContentFile(f"{myfolder}/{filename}")
+        
+        remaining = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
+        if len(remaining) < 2 and delete:
+            folder.Delete()
+
+# downloadFromDuplicatedDriveFolders("meadow_2021_", "files/bands/2021")
+# downloadFromDuplicatedDriveFolders("meadow_2019", "files/bands/2019", False)
+
+
+
