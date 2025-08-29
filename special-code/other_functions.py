@@ -162,6 +162,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
     into one file (geotiff, vrt and/or csv)'''
     variable = endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
+    stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
     
     if endname.endswith(".tif"):
         all_files = [f for f in glob.glob(f"{inputdir}/*{endname}") if not f.endswith(f"1SD_{endname}")]
@@ -177,9 +178,13 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                 df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
                 geotiff.close()
                 df.columns = ['Y', 'X', variable]
+                # extract summary statistics
+                stats = df[variable].describe().values
+                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[2:5]) + [stats[-1]]
                 gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
                 df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
                 all_data = pd.concat([all_data, df])
+        stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         # write to a vrt file
         vrt_path = f'{inputdir}/{variable}.vrt'
         if not os.path.exists(vrt_path):
@@ -190,14 +195,29 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         if "," in variable:
             mycols = ast.literal_eval(variable)
             all_data = all_data = pd.DataFrame(columns=['Y', 'X'] + mycols)
+            # create summary statistics dataframe for each variable
+            statCol = ['ID', 'PixelCount']
+            for col in mycols:
+                statCol.extend([col+"_mean", col+"_std", col+"_min", col+"_max"])
+            stats_df = pd.DataFrame(columns=statCol)
         all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
         for file in all_files:
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df = pd.read_csv(file)
             df = df.loc[:, (['Y', 'X'] + mycols)] if "," in variable else df.loc[:, ['Y', 'X', variable]]
+            if "," in variable:
+                val = [file.split("_")[2][:-4], df.shape[0]]
+                for col in all_data.columns[2:]:
+                    stats = df[col].describe().values
+                    val.extend(list(stats[2:5]) + [stats[-1]])
+                stats_df.loc[len(stats_df)] = val
+            else:
+                stats = df[variable].describe().values
+                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[2:5]) + [stats[-1]]
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
+        stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
         all_data.to_csv(outfile, index=False)
     else:
@@ -244,7 +264,7 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
 
 
 # this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
-def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
+def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True, downloadFile = True):
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
     if gauth.credentials is None:   # Authenticate if there are no valid credentials
@@ -261,12 +281,12 @@ def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
     folders = drive.ListFile({'q': "mimeType='application/vnd.google-apps.folder' and title='files' and trashed=false"}).GetList()
     for folder in folders:
         folder_id = folder['id']
-        query = f"'{folder_id}' in parents and trashed=false and title contains '{nameId}'"
-        file_list = drive.ListFile({'q': query}).GetList()
-
-        for f in file_list:     # download the files
-            filename = f['title']
-            f.GetContentFile(f"{myfolder}/{filename}")
+        if downloadFile:
+            query = f"'{folder_id}' in parents and trashed=false and title contains '{nameId}'"
+            file_list = drive.ListFile({'q': query}).GetList()    
+            for f in file_list:     # download the files
+                filename = f['title']
+                f.GetContentFile(f"{myfolder}/{filename}")
         
         remaining = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
         if len(remaining) < 2 and delete:

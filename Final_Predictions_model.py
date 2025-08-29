@@ -449,11 +449,19 @@ sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)
 # load all relevant GEE images/collections for both UTM Zones
 # flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
 # flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 dem_10 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slope_10 = ee.Terrain.slope(dem_10).clip(sierra_zone)
 slope_11 = ee.Terrain.slope(dem_11).clip(sierra_zone)
-
+'''
+dem = ee.ImageCollection('USGS/3DEP/10m_collection').filterBounds(sierra_zone).mosaic().select('elevation')
+dem_11 = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+dem_10 = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
+slope_10 = ee.Terrain.slope(dem_10)
+slope_11 = ee.Terrain.slope(dem_11)
+dem_10, dem_11 = dem_10.setDefaultProjection("EPSG:4326"), dem_11.setDefaultProjection("EPSG:4326")
+'''
 landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
