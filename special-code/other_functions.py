@@ -236,7 +236,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
 
 # mergeToSingleFile("files/2023", "files/merged_BNPP.csv", "NEP.csv")
-# mergeToSingleFile("files/2021", "files/2021_Zone10.csv", "['NEP','ANPP','BNPP','Rh'].csv")
+# mergeToSingleFile("files/2021", "files/2021_Meadows.csv", "['NEP','ANPP','BNPP','Rh'].csv")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
 # mergeToSingleFile("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
@@ -260,7 +260,7 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
         out_grd.rio.to_raster((inputdir[:11] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
         print(attribute, "done!")
 
-# mergeToSingleFile("files/2021_Zone10.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
+# splitCSVToGeotiffs("files/2021_Meadows.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
 
 
 # this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
