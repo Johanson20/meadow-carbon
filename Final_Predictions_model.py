@@ -152,9 +152,9 @@ def interpolate_group(group):
         # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
         group['Snow_days'] = len(date_range) - growth_period.shape[0]
         group['Wet_days'] = growth_period[growth_period.NDWI > 0.5].shape[0]
-        # assign respiration values and SD for snow covered days fixed values
+        '''# assign respiration values and SD for snow covered days fixed values
         group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'] = 0.6824
-        group.loc[group['NDSI'] > 0.2, '1SD_CO2'] = 0.6328
+        group.loc[group['NDSI'] > 0.2, '1SD_CO2'] = 0.6328'''
         # calculate growing season (NDVI > 0.2) integrals
         integrals = growth_period[(growth_period.NDWI <= 0.5) & (growth_period.NDVI >= 0.2)]
         integrals = integrals[cols[:6] + cols[-7:]].sum()
