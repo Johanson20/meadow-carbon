@@ -412,9 +412,10 @@ data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
 with PdfPages('files/BGB_Scatter_plots.pdf') as pdf:
-    for i in range(0, len(var_col), 9):
+    col2 = cols[10:]
+    for i in range(0, len(col2), 9):
         # Get up to 9 features for this page
-        page_features = var_col[i:i+9]
+        page_features = col2[i:i+9]
         # Create 3x3 subplots
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
         axes = axes.flatten()  # Flatten to 1D array for easy indexing
@@ -603,9 +604,10 @@ data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
 with PdfPages('files/AGB_Scatter_plots.pdf') as pdf:
-    for i in range(0, len(var_col), 9):
+    col2 = cols[17:-8]
+    for i in range(0, len(col2), 9):
         # Get up to 9 features for this page
-        page_features = var_col[i:i+9]
+        page_features = col2[i:i+9]
         # Create 3x3 subplots
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
         axes = axes.flatten()  # Flatten to 1D array for easy indexing
