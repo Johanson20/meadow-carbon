@@ -88,7 +88,7 @@ def processGeotiff(df):
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
     df['AET'] *= 0.1
-    logCols = ['Organic_Matter', 'Shallow_Hydra_Conduc']
+    logCols = ['Organic_Matter', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc']
     df[logCols] = df[logCols].apply(lambda col: np.power(10, col))
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     # landsat 7 scan lines leads to discrepancies in blank/filled values between landsat and gridmet combined days
@@ -269,6 +269,8 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
                             geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         if not os.path.exists(image_name):    # use g-drive download if conventional one fails
             if bandnames1 > allBands and residue_image is not None:
+                residue_image = residue_image.select(residue_image.bandNames().slice(allBands))
+                bandnames1 -= allBands
                 total_image = combined_image.addBands(residue_image)
             else:
                 total_image = combined_image
@@ -276,6 +278,7 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
                 geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             except:
                 continue
+    return bandnames1
 
 
 def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilesplit=0):
@@ -315,7 +318,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         shall_hydra = shallow_hydra_cond_11.clip(shapefile_bbox)
         deep_hydra = deep_hydra_cond_11.clip(shapefile_bbox)
         shall_org = shallow_organic_m_11.clip(shapefile_bbox)
-        # lith = lithology_11.clip(shapefile_bbox)
+        lith = lithology_11.clip(shapefile_bbox)
     else:
         # flow_30m = flow_acc_10.clip(shapefile_bbox)
         elev_30m = dem_10.clip(shapefile_bbox)
@@ -328,7 +331,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         shall_hydra = shallow_hydra_cond.clip(shapefile_bbox)
         deep_hydra = deep_hydra_cond.clip(shapefile_bbox)
         shall_org = shallow_organic_m.clip(shapefile_bbox)
-        # lith = lithology.clip(shapefile_bbox)
+        lith = lithology.clip(shapefile_bbox)
     # filter for summer and fall and calculate indices
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
     landsat_June = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
@@ -356,10 +359,10 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         
         # align other satellite data with landsat and make resolution (30m)
         if idx == 0:     # extract constant values once for the same meadow
-            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
+            combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, lith, landsat_June, landsat_Sept])
             if noImages > threshold:   # split image when bands would exceed 1024
                 bandnames1 = allBands
-                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, landsat_June, landsat_Sept])
+                residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, lith, landsat_June, landsat_Sept])
         else:
             if noBands < (1024 - recurringBands):
                 noBands += recurringBands     # for number of recurring bands
@@ -486,7 +489,7 @@ deep_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 shallow_hydra_cond_11 = ee.ImageCollection(hydra_cond_11.toList(3)).mean()
 deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
 shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
-# lithology_11 = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32611", scale=30)
+lithology_11 = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
 deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
 shallow_sand = ee.ImageCollection(perc_sand.toList(3)).mean()
@@ -494,12 +497,12 @@ deep_sand = ee.Image(perc_sand.toList(6).get(3))
 shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
-# lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32610", scale=30)
+lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx', 'srad'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'NDWI_June', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'Lithology', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIds = shapefile.ID
@@ -541,7 +544,7 @@ def prepareMeadows(meadowId):
         combined_image, residue_image, noBands, bandnames1 = generateCombinedImage(mycrs, shapefile_bbox, image_list, dates)
         subregions = splitMeadowBounds(feature, True, shapefile_bbox)
         imagename = f'files/bands/{year}/meadow_{year}_{meadowId}'
-        downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1)
+        bandnames1 = downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1)
         
         return noBands + bandnames1
     except:
@@ -576,7 +579,7 @@ def processMeadow(meadowCues):
                 extra_image_name = f'{inputname}_{i}_e.tif'
                 image_names.add(extra_image_name[17:-4])
         
-        if totalBands < 1024:
+        if totalBands < 1024 or not os.path.exists(f'{meadowId}_0_e.tif'):
             while totalBands > allBands:
                 bandnames = bandnames.copy() + bandnames[:recurringBands]
                 totalBands -= recurringBands
@@ -615,11 +618,11 @@ def processMeadow(meadowCues):
             res = 30
             out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh'], ['1SD_NEP.tif', '1SD_NEP']]
             for i in range(8):
-                out_raster = f'{outputname}_{out_rasters[i][0]}'
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs).to_crs(3310)
                 gdf.plot(column=response_col, cmap='viridis', legend=True)
+                out_raster = f'{outputname}_{out_rasters[i][0]}'
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd = out_grd.rio.reproject(epsg_crs)
                 out_grd.rio.to_raster(out_raster)
