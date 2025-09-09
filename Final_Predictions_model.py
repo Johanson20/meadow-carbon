@@ -250,6 +250,7 @@ def loadYearCollection(year):
 
 def downloadImageBands(subregions, imagename, feature, combined_image, residue_image, bandnames1):
     mycrs = feature.epsgCode
+    extra_bands = bandnames1
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'{imagename}_{i}.tif'
@@ -269,8 +270,9 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
                             geemap.ee_export_image(residue_image.clip(subregion), filename=extra_image_name, scale=30, crs=mycrs, region=subregion)
         if not os.path.exists(image_name):    # use g-drive download if conventional one fails
             if bandnames1 > allBands and residue_image is not None:
+                # remove duplicated residue bands since G-drive can handle >1024 bands at once
                 residue_image = residue_image.select(residue_image.bandNames().slice(allBands))
-                bandnames1 -= allBands
+                extra_bands = bandnames1 - allBands
                 total_image = combined_image.addBands(residue_image)
             else:
                 total_image = combined_image
@@ -278,7 +280,7 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
                 geemap.ee_export_image_to_drive(total_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
             except:
                 continue
-    return bandnames1
+    return extra_bands
 
 
 def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilesplit=0):
@@ -361,6 +363,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         if idx == 0:     # extract constant values once for the same meadow
             combined_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, lith, landsat_June, landsat_Sept])
             if noImages > threshold:   # split image when bands would exceed 1024
+                # initially duplicate all bands in extra image before adding extra
                 bandnames1 = allBands
                 residue_image = landsat_image.addBands([date_band, gridmet_30m, tclimate_30m, elev_30m, slope_30m, swe_30m, shall_clay, deep_clay, shall_sand, d_sand, shall_hydra, deep_hydra, shall_org, lith, landsat_June, landsat_Sept])
         else:
