@@ -264,7 +264,7 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
 
 
 # this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
-def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True, downloadFile = True):
+def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
     if gauth.credentials is None:   # Authenticate if there are no valid credentials
@@ -277,23 +277,33 @@ def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True, downloa
     gauth.SaveCredentialsFile("mycreds.txt")
     drive = GoogleDrive(gauth)
     
-    # list all folders with same name and extract file details to download
+    # list all folders with same name and extract with query, all files in them to download
     folders = drive.ListFile({'q': "mimeType='application/vnd.google-apps.folder' and title='files' and trashed=false"}).GetList()
-    for folder in folders:
-        folder_id = folder['id']
-        if downloadFile:
-            query = f"'{folder_id}' in parents and trashed=false and title contains '{nameId}'"
-            file_list = drive.ListFile({'q': query}).GetList()    
-            for f in file_list:     # download the files
-                filename = f['title']
-                f.GetContentFile(f"{myfolder}/{filename}")
+    folder_ids = [f['id'] for f in folders]
+    all_files = []
+    
+    # mini-function to go through subset of folders
+    def chunked(iterable, n):
+        for i in range(0, len(iterable), n):
+            yield iterable[i:i+n]
+
+    for chunk in chunked(folder_ids, 500):   # extract from at most 500 folders at a time, due to limits
+        folder_query = " or ".join([f"'{fid}' in parents" for fid in chunk])
+        query = f"({folder_query}) and trashed=false and title contains '{nameId}'"
+        files = drive.ListFile({'q': query}).GetList()
+        all_files.extend(files)
+    
+    for file in all_files:     # download the files
+        filename = file['title']
+        if not os.path.exists(f"{myfolder}/{filename}"): file.GetContentFile(f"{myfolder}/{filename}")
         
-        remaining = drive.ListFile({'q': f"'{folder_id}' in parents and trashed=false"}).GetList()
-        if len(remaining) < 2 and delete:
-            folder.Delete()
+        # delete file if it is the only one in folder
+        if delete:
+            parent_id = file['parents'][0]['id']
+            remaining = drive.ListFile({'q': f"'{parent_id}' in parents and trashed=false"}).GetList()
+            if len(remaining) < 2:
+                folder = drive.CreateFile({'id': parent_id})
+                folder.Delete()
 
 # downloadFromDuplicatedDriveFolders("meadow_2021_", "files/bands/2021")
 # downloadFromDuplicatedDriveFolders("meadow_2019", "files/bands/2019", False)
-
-
-
