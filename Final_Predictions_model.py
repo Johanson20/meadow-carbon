@@ -254,7 +254,7 @@ def downloadImageBands(subregions, imagename, feature, combined_image, residue_i
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     for i, subregion in enumerate(subregions):
         image_name = f'{imagename}_{i}.tif'
-        if feature.Area_km2 < 5:     # (image limit = 48 MB and downloads at most 1024 bands)
+        if feature.Area_km2 < 5 and not os.path.exists(image_name):     # (image limit = 48 MB and downloads at most 1024 bands)
             with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                 geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
                 if not os.path.exists(image_name):
@@ -509,7 +509,7 @@ cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temp
 recurringBands, allBands = len(cols[:12]), len(cols[:-9])
 G_driveAccess()
 allIds = shapefile.ID
-current_time = datetime.strptime('07/09/2025', '%m/%d/%Y').timestamp()*1000
+current_time = datetime.strptime('09/25/2025', '%m/%d/%Y').timestamp()*1000
 
 # re-run this part for each unique year
 year = 2021
@@ -561,7 +561,12 @@ def processMeadow(meadowCues):
             return -1   # if no GEE data is available for the meadow's buffer
         feature = shapefile[shapefile.ID == meadowId].iloc[0]
         mycrs = feature.epsgCode
-            
+        
+        # check if results already exist
+        outputname = f'files/{year}/meadow_{year}_{meadowId}'
+        if os.path.exists(f'{outputname}.csv'):
+            return meadowId
+        
         # dataframe to store results for each meadow
         all_data = pd.DataFrame(columns=cols)
         df = pd.DataFrame()
@@ -569,7 +574,6 @@ def processMeadow(meadowCues):
         noBands1 = totalBands - noBands
         image_names = set()
         inputname = f'files/bands/{year}/meadow_{year}_{meadowId}'
-        outputname = f'files/{year}/meadow_{year}_{meadowId}'
         bandnames = cols[:allBands]
         bandnames1 = bandnames.copy() if totalBands > 1024 else []
         subregions = splitMeadowBounds(feature, False)
@@ -594,8 +598,6 @@ def processMeadow(meadowCues):
                 bandnames1 = bandnames1.copy() + bandnames1[:recurringBands]
                 noBands1 -= recurringBands
         
-        if os.path.exists(f'{outputname}.csv'):
-            return meadowId
         while image_names:    # read in each downloaded image, process and stack them into a dataframe
             image_name = [f"files/bands/{year}/" + imagename + ".tif" for imagename in image_names][0]
             if downloadFinishedTasks(image_names) == -3:

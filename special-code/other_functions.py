@@ -160,7 +160,7 @@ allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
     into one file (geotiff, vrt and/or csv)'''
-    variable = endname.split(".")[0]
+    variable = endname[:-4]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
     
@@ -194,7 +194,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
     elif endname.endswith(".csv"):
         if "," in variable:
             mycols = ast.literal_eval(variable)
-            all_data = all_data = pd.DataFrame(columns=['Y', 'X'] + mycols)
+            all_data = pd.DataFrame(columns=['Y', 'X'] + mycols)
             # create summary statistics dataframe for each variable
             statCol = ['ID', 'PixelCount']
             for col in mycols:

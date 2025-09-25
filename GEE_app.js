@@ -5,9 +5,22 @@ var assets = {"1994": {"AET (Annual Evapotranspiration)": AET_1994, "Annual Prec
               "2019": {"AET (Annual Evapotranspiration)": AET_2019, "Annual Precipitation": Precip_2019, "ANPP (Aboveground Net Primary Productivity)": ANPP_2019,
               "ANPP StdErr": ANPP_SD_2019, "BNPP (Belowground Net Primary Productivity)": BNPP_2019, "BNPP StdErr": BNPP_SD_2019, "NEP (Net Ecoystem Productivity)": NEP_2019, 
               "NEP StdErr": NEP_SD_2019, "Rh (Respiration)": Rh_2019, "Rh StdErr": Rh_SD_2019},
+              "2019_new": {"AET (Annual Evapotranspiration)": AET_2019_, "Annual Precipitation": Precip_2019_, "ANPP (Aboveground Net Primary Productivity)": ANPP_2019_,
+              "ANPP StdErr": ANPP_SD_2019_, "BNPP (Belowground Net Primary Productivity)": BNPP_2019_, "BNPP StdErr": BNPP_SD_2019_, "NEP (Net Ecoystem Productivity)": NEP_2019_, 
+              "NEP StdErr": NEP_SD_2019_, "Rh (Respiration)": Rh_2019_, "Rh StdErr": Rh_SD_2019_, "Root Biomass": Root_2019_, "Active Growth Days": AGD_2019_,
+              "Root Exudates": Exudates_2019_, "Root Turnover": Turnover_2019_, "Snow Rh Flux": Snow_Flux_2019_, "Aboveground Biomass": Herb_2019_},
               "2021": {"AET (Annual Evapotranspiration)": AET_2021, "Annual Precipitation": Precip_2021, "ANPP (Aboveground Net Primary Productivity)": ANPP_2021,
               "ANPP StdErr": ANPP_SD_2021, "BNPP (Belowground Net Primary Productivity)": BNPP_2021, "BNPP StdErr": BNPP_SD_2021, "NEP (Net Ecoystem Productivity)": NEP_2021, 
-              "NEP StdErr": NEP_SD_2021, "Rh (Respiration)": Rh_2021, "Rh StdErr": Rh_SD_2021}};
+              "NEP StdErr": NEP_SD_2021, "Rh (Respiration)": Rh_2021, "Rh StdErr": Rh_SD_2021},
+              "2021_new": {"AET (Annual Evapotranspiration)": AET_2021_, "Annual Precipitation": Precip_2021_, "ANPP (Aboveground Net Primary Productivity)": ANPP_2021_,
+              "ANPP StdErr": ANPP_SD_2021_, "BNPP (Belowground Net Primary Productivity)": BNPP_2021_, "BNPP StdErr": BNPP_2021_, "NEP (Net Ecoystem Productivity)": NEP_2021_, 
+              "NEP StdErr": NEP_SD_2021_, "Rh (Respiration)": Rh_2021_, "Rh StdErr": Rh_SD_2021_, "Root Biomass": Root_2021_, "Active Growth Days": AGD_2021_,
+              "Root Exudates": Exudates_2021_, "Root Turnover": Turnover_2021_, "Snow Rh Flux": Snow_Flux_2021_, "Aboveground Biomass": Herb_2021_},
+              "2023": {"AET (Annual Evapotranspiration)": AET_2023_, "Annual Precipitation": Precip_2023_, "ANPP (Aboveground Net Primary Productivity)": ANPP_2023_,
+              "ANPP StdErr": ANPP_SD_2023_, "BNPP (Belowground Net Primary Productivity)": BNPP_2023_, "BNPP StdErr": BNPP_2023_, "NEP (Net Ecoystem Productivity)": NEP_2023_, 
+              "NEP StdErr": NEP_SD_2023_, "Rh (Respiration)": Rh_2023_, "Rh StdErr": Rh_SD_2023_, "Root Biomass": Root_2023_, "Active Growth Days": AGD_2023_,
+              "Root Exudates": Exudates_2023_, "Root Turnover": Turnover_2023_, "Snow Rh Flux": Snow_Flux_2023_, "Aboveground Biomass": Herb_2023_}
+};
 
 // extract years and create the selection panel
 var years = Object.keys(assets);
@@ -82,7 +95,7 @@ function updateMap(year, attribute) {
   var minVal = ee.Number(stats.get('b1_p1')).round().divide(10).floor().multiply(10);
   var maxVal = ee.Number(stats.get('b1_p99')).round().divide(10).ceil().multiply(10);
   // Style points by selected attribute
-  var visParams = {palette: ['0000FF', '00FFFF', 'FFFF00', 'FF0000']};
+  var visParams = {palette: ['FF0000', 'FFFF00', '00FFFF', '0000FF']};
   
   //re-draw map with new layer after selection
   minVal.evaluate(function(mini) {
