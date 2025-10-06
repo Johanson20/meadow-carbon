@@ -55,7 +55,8 @@ def calculateIndices(image):
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
-    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi])
+    ndgi = image.expression("((0.688 * Green) + (0.312 * NIR) - RED) / ((0.688 * Green) + (0.312 * NIR) - RED)", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'Green': image.select('Green')}).rename('NDGI')
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi, ndgi])
 
 
 def maskCloud(image):
@@ -181,9 +182,9 @@ deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
 
 dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
-dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI = [], [], [], [], [], [], []
-NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer = [], [], [], [], []
-NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall = [], [], [], [], []
+dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI, dNDGI = [], [], [], [], [], [], [], []
+NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer, NDGI_Summer = [], [], [], [], [], []
+NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall, NDGI_Fall = [], [], [], [], [], []
 flow, slope, elevation, wet, snowy, S_Rad = [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
@@ -260,11 +261,13 @@ for idx in range(data.shape[0]):
     SAVI_Summer.append(bands_June['SAVI'])
     BSI_Summer.append(bands_June['BSI'])
     NDPI_Summer.append(bands_June['NDPI'])
+    NDGI_Summer.append(bands_June['NDGI'])
     NDWI_Fall.append(bands_Sept['NDWI'])
     EVI_Fall.append(bands_Sept['EVI'])
     SAVI_Fall.append(bands_Sept['SAVI'])
     BSI_Fall.append(bands_Sept['BSI'])
     NDPI_Fall.append(bands_Sept['NDPI'])
+    NDGI_Fall.append(bands_Sept['NDGI'])
     
     dBlue.append(integrals['Blue'])
     dGreen.append(integrals['Green'])
@@ -279,6 +282,7 @@ for idx in range(data.shape[0]):
     dBSI.append(integrals['BSI'])
     dNDPI.append(integrals['NDPI'])
     dNDSI.append(integrals['NDSI'])
+    dNDGI.append(integrals['NDGI'])
     
     wet.append(wet_days)
     snowy.append(snow_days)
@@ -312,11 +316,13 @@ data['EVI_June'] = EVI_Summer
 data['SAVI_June'] = SAVI_Summer
 data['BSI_June'] = BSI_Summer
 data['NDPI_June'] = NDPI_Summer
+data['NDGI_June'] = NDGI_Summer
 data['NDWI_Sept'] = NDWI_Fall
 data['EVI_Sept'] = EVI_Fall
 data['SAVI_Sept'] = SAVI_Fall
 data['BSI_Sept'] = BSI_Fall
 data['NDPI_Sept'] = NDPI_Fall
+data['NDGI_Sept'] = NDGI_Fall
 
 data['dBlue'] = dBlue
 data['dGreen'] = dGreen
@@ -331,6 +337,7 @@ data['dSAVI'] = dSAVI
 data['dBSI'] = dBSI
 data['dNDPI'] = dNDPI
 data['dNDSI'] = dNDSI
+data['dNDGI'] = dNDGI
 
 data['Cdef'] = cdef
 data['Elevation'] = elevation

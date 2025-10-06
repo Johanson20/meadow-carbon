@@ -160,7 +160,7 @@ allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
     into one file (geotiff, vrt and/or csv)'''
-    variable = endname[:-4]
+    variable = endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
     
@@ -171,13 +171,16 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             relevant_files.append(file)
             if not vrt_only:    # read all geotiffs
                 # distinguish between meadows in different EPSG zones
-                zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
+                zone = 32610 if int(file.split("_")[2]) in allIds else 32611
                 with rasterio.Env(CPL_LOG='ERROR'):
                     geotiff = xr.open_rasterio(file)
                 df = geotiff.to_dataframe(name='value').reset_index()
                 df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
                 geotiff.close()
-                df.columns = ['Y', 'X', variable]
+                if df.empty:
+                    continue
+                else:
+                    df.columns = ['Y', 'X', variable]
                 # extract summary statistics
                 stats = df[variable].describe().values
                 stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[2:5]) + [stats[-1]]
