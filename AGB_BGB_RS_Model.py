@@ -80,23 +80,40 @@ def getBandValues(image):
     return ee.Feature(None, values).set('Date', date).set('UTM', utm_zone)
 
 
+def gridmetValues(image):
+    values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
+    date = image.date().format('YYYY-MM-dd')
+    return ee.Feature(None, values).set('Date', date)
+
+
 # get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def extractAllValues(landsat, year):
     # get band values and ensure it is not null
     landsat_values = landsat.map(getBandValues).getInfo()['features']
     if not landsat_values:
         return [{'Blue': None}, {'Blue': None}, 0, {'Blue': None}, 0, 0]
-    values = []
+    start_year, end_year = str(int(year)-1)+"-10-01", str(int(year))+"-10-01"
+    if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
+        temp_val = gridmet_11.filterBounds(point).filterDate(start_year, end_year)
+    else:
+        temp_val = gridmet.filterBounds(point).filterDate(start_year, end_year)
+    gridmet_values = temp_val.map(gridmetValues).getInfo()['features']
+    L_values, G_values = [], []
     # convert band values and other properties to a dataframe for manipulation
     for feature in landsat_values:
-        values.append(feature['properties'])
-    df = pd.DataFrame(values)
+        L_values.append(feature['properties'])
+    for feature in gridmet_values:
+        G_values.append(feature['properties'])
+    df = pd.DataFrame(L_values)
+    df_grid = pd.DataFrame(G_values)
     df['Date'] = pd.to_datetime(df['Date'])
+    df_grid['Date'] = pd.to_datetime(df_grid['Date'])
     df.drop_duplicates(subset='Date', inplace=True)
     df.dropna(inplace=True)
     
-    # Set the 'date' column as the index, re-index and linearly interpolate bands at daily frequency
+    # Set the 'date' column as the index, re-index and linearly interpolate Landsat/Gridmet bands at daily frequency
     df_daily = df.set_index('Date')
+    df_grid = df_grid.set_index('Date')
     years = sorted(df_daily.index.year.unique())
     date_range = pd.date_range(start=str(years[0])+"-10-01", end=str(years[-1])+"-10-01", freq='D')[:-1]
     df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill()
@@ -104,18 +121,23 @@ def extractAllValues(landsat, year):
     # also extract two sets of values: the current year and the previous 5 years.
     df_prev_5 = df_daily.loc[:str(years[-1]-1)+"-09-30"]
     df_year = df_daily.loc[str(years[-1]-1)+"-10-01":]
+    df_year = pd.concat([df_year, df_grid], axis=1)
     
-    # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5)
-    integrals = df_year[df_year.NDSI <= 0.2]
-    no_snow_days = len(df_year) - len(integrals)
-    no_wet_days = integrals[integrals.NDWI > 0.5].shape[0]
-    # Active growing season is also when NDVI >= 0.2 without snow or water coverage
-    integrals = integrals[(integrals.NDWI <= 0.5) & (integrals.NDVI >= 0.2)]
-    integrals = integrals.sum()
+    # Active growing season is also when NDVI >= 0.2 without snow or water coverage, at above zero temperature
+    df_non_snow = df_year[(df_year.NDSI <= 0.2)]
+    df_growthdays = df_non_snow[(df_non_snow.NDVI > 0.2) & (df_non_snow.NDWI <= 0.5) & (df_non_snow.tmmn > 273.15)]
+    df_growthdays['NDVI_Ratio'] = (df_growthdays['NDVI'] - min(df_growthdays['NDVI']))/(max(df_growthdays['NDVI']) - min(df_growthdays['NDVI']))
+    # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
+    active_growth_days = sum(df_growthdays.loc[start_year:str(int(year)-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(df_growthdays.loc[str(int(year))+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(df_growthdays.loc[str(int(year))+'-01-01':str(int(year))+'-07-14', 'NDVI_Ratio'] > 0.2)
+    
+    # compute number of snow days (NDSI > 0.2) and number of wet days (NDWI > 0.5), and growing season integrals
+    no_snow_days = len(df_year) - len(df_non_snow)
+    no_wet_days = df_non_snow[df_non_snow.NDWI > 0.5].shape[0]
+    integrals = df_growthdays.sum()
     # Compute indices for previous 5 years of june and sept
     june_prev_5 = df_prev_5[df_prev_5.index.month == 6]
     sept_prev_5 = df_prev_5[df_prev_5.index.month == 9]
-    return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode().iloc[0], integrals, no_snow_days, no_wet_days]
+    return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode().iloc[0], integrals, no_snow_days, no_wet_days, active_growth_days]
 
 
 # resample images collections whose band values are not 30m for both UTM zones
@@ -185,7 +207,7 @@ dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
 dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI, dNDGI = [], [], [], [], [], [], [], []
 NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer, NDGI_Summer = [], [], [], [], [], []
 NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall, NDGI_Fall = [], [], [], [], [], []
-flow, slope, elevation, wet, snowy, S_Rad = [], [], [], [], [], []
+flow, slope, elevation, wet, snowy, S_Rad, AGD = [], [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
@@ -200,7 +222,7 @@ for idx in range(data.shape[0]):
     prev_5_year = str(int(year)-6) + "-10-01"
     
     landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, year+"-10-01")
-    bands_June, bands_Sept, utm, integrals, snow_days, wet_days = extractAllValues(landsat, year)
+    bands_June, bands_Sept, utm, integrals, snow_days, wet_days, growth_days = extractAllValues(landsat, year)
     
     if not bands_June['Blue'] or not bands_Sept['Blue']:     # drop rows that returned null band values
         data.drop(idx, inplace=True)
@@ -210,51 +232,6 @@ for idx in range(data.shape[0]):
     if not integrals['Blue']:   # if integrals are null (probably from null band values), assign zero to them
         for band in integrals.index:
             integrals[band] = 0
-    
-    # compute band values: daymetv4 (1km resolution) can also be used for SWE
-    mycrs = 'EPSG:326' + str(utm)
-    if mycrs == "EPSG:32611":
-        tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
-        srad = gridmet_11.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
-        snow_we = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
-        tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
-        elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-        slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
-        flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_clay = shallow_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_clay = deep_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_hydra = shallow_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_hydra = deep_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_sand = shallow_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    else:
-        tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
-        srad = gridmet.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
-        snow_we = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
-        tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
-        elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
-        slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
-        flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_clay = shallow_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_clay = deep_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_hydra = shallow_hydra_cond.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_hydra = deep_hydra_cond.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shallow_sand = shallow_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        
-    swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
-    tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    mean_pr = tclimate['pr']
-    cdef_value = 0.1*tclimate['def']
-    aet = 0.1*tclimate['aet']
-    temps = tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
-    rad = srad.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['srad']
-    tmin = temps['tmmn']
-    tmax = temps['tmmx']
     
     NDWI_Summer.append(bands_June['NDWI'])
     EVI_Summer.append(bands_June['EVI'])
@@ -286,26 +263,7 @@ for idx in range(data.shape[0]):
     
     wet.append(wet_days)
     snowy.append(snow_days)
-    mean_annual_pr.append(mean_pr)
-    flow.append(flow_value)
-    elevation.append(elev)
-    slope.append(slope_value)
-    swe.append(swe_value)
-    et.append(aet)
-    cdef.append(cdef_value)
-    min_temp.append(tmin)
-    max_temp.append(tmax)
-    S_Rad.append(rad)
-    
-    Shallow_Clay.append(shallow_clay)
-    Shallow_Sand.append(shallow_sand)
-    Shallow_Hydra.append(np.power(10, shallow_hydra))
-    Lithology.append(lith)
-    Deep_Clay.append(deep_clay)
-    Deep_Sand.append(deep_sand)
-    Deep_Hydra.append(np.power(10, deep_hydra))
-    Organic_Matter.append(np.power(10, shall_org))
-    
+    AGD.append(growth_days)
     if idx%20 == 0: print(idx, end=' ')
 
 # checks if they are all cloud free (should equal data.shape[0])
@@ -351,6 +309,7 @@ data['Wet_days'] = wet
 data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 data['SRad'] = S_Rad
+data['Active_growth_days'] = AGD
 
 data['Shallow_Clay'] = Shallow_Clay
 data['Deep_Clay'] = Deep_Clay
@@ -396,7 +355,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Deep_Sand', 'Wet_days', 'SWE', 'AET', 'dNDVI', 'Elevation', 'Deep_Clay']]
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'dNDGI', 'NDGI_June', 'NDGI_Sept', 'Minimum_temperature', 'Maximum_temperature']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -458,7 +417,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=13, n_estimators=75, subsample=0.9, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=14, n_estimators=500, subsample=0.6, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
@@ -469,10 +428,9 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.3, max_depth=13, n_estimators=75,
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.03, max_depth=14, n_estimators=500,
                                          subsample=0.9, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                          verbose=1, random_state=10)
-
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
 # Make partial dependence plots (3 by 3 per page)

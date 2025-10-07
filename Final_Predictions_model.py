@@ -135,27 +135,23 @@ def spatial_interpolate(row, df):
 
 def interpolate_group(group):
     group = group.drop_duplicates(subset='Date').set_index('Date').reindex(date_range)
-    group['Month'] = group.index.month
-    interp_cols = [col for col in group.columns if col not in ['AET', 'Annual_Precipitation', 'Month']]
+    interp_cols = [col for col in group.columns if col not in ['AET', 'Annual_Precipitation']]
     # interpolate daily values for all daily bands; and them monthly bands (AET and Precipitation)
     group.loc[:, interp_cols] = group.loc[:, interp_cols].interpolate(method='time').ffill().bfill()
-    group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
-    group['Annual_Precipitation'] = group.loc[:, ['Month', 'Annual_Precipitation']].groupby('Month').first().values.sum()
-    group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
-    
     try:
         # non-snow covered days
-        growth_period = group[group.NDSI <= 0.2]
-        growth_period['NDVI_Ratio'] = (growth_period['NDVI'] - min(growth_period['NDVI']))/(max(growth_period['NDVI']) - min(growth_period['NDVI']))
+        growth_period = group[(group.NDSI <= 0.2)]
+        growthdays = growth_period[(growth_period.NDVI > 0.2) & (growth_period.NDWI <= 0.5) & (growth_period.Minimum_temperature > 273.15)]
+        growthdays['NDVI_Ratio'] = (growthdays['NDVI'] - min(growthdays['NDVI']))/(max(growthdays['NDVI']) - min(growthdays['NDVI']))
         # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
-        group['Active_growth_days'] = sum(growth_period.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(growth_period.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(growth_period.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
+        group['Active_growth_days'] = sum(growthdays.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(growthdays.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(growthdays.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
         # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
         group['Snow_days'] = len(date_range) - growth_period.shape[0]
         group['Wet_days'] = growth_period[growth_period.NDWI > 0.5].shape[0]
-        '''# assign respiration values and SD for snow covered days fixed values
-        group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'] = 0.6824
-        group.loc[group['NDSI'] > 0.2, '1SD_CO2'] = 0.6328'''
-        # calculate growing season (NDVI > 0.2) integrals
+        group['Month'] = group.index.month
+        group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
+        group[['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').first().values.sum()
+        group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
         integrals = growth_period[(growth_period.NDWI <= 0.5) & (growth_period.NDVI >= 0.2)]
         integrals = integrals[cols[:6] + cols[-7:]].sum()
         for integral in integrals.keys():
