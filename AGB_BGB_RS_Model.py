@@ -491,7 +491,7 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.05, max_depth=14, n_estimators=200,
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.08, max_depth=10, n_estimators=1000,
                                          subsample=0.4, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                          verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)

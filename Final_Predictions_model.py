@@ -183,7 +183,7 @@ def makePredictions(df):
     df = df.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
     rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
 
-    # Predict AGB/BGB per pixel using integrals and set negative values to zero, then convert to NEP
+    # Predict AGB/BGB and set negative values to zero, then convert to NEP
     df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
     df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
     sd_agb = agb_84_model.predict(df.loc[:, agb_sd_col])
