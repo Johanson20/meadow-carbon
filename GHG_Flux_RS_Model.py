@@ -198,6 +198,7 @@ data['EVI'] = 2.5*(data['NIR'] - data['Red'])/(data['NIR'] + 6*data['Red'] - 7.5
 data['SAVI'] = 1.5*(data['NIR'] - data['Red'])/(data['NIR'] + data['Red'] + 0.5)
 data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Blue']))/(data['Red'] + data['SWIR_1'] + data['NIR'] + data['Blue'])
 data['NDPI'] = (data['NIR'] - (0.56*data['Red'] + 0.44*data['SWIR_2']))/(data['NIR'] + 0.56*data['Red'] + 0.44*data['SWIR_2'])
+data['NDGI'] = ((0.688*data['Green']) + (0.312*data['NIR']) - data['RED']) / ((0.688*data['Green']) + (0.312*data['NIR']) + data['RED'])
 
 # checks how many pixels are cloud free (non-null value);
 # all bands would be simultaneously cloud-free or not

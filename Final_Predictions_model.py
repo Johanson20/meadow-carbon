@@ -86,7 +86,7 @@ def processGeotiff(df):
     # drop null columns and convert infinity to NAs
     nullIds = list(np.where(df['Maximum_temperature'].isnull())[0])
     df.drop(nullIds, inplace = True)
-    df.columns = cols[:-7]
+    df.columns = cols[:-8]
     df['AET'] *= 0.1
     logCols = ['Organic_Matter', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc']
     df[logCols] = df[logCols].apply(lambda col: np.power(10, col))
@@ -110,6 +110,7 @@ def processGeotiff(df):
     df['SAVI'] = 1.5*(df['NIR'] - df['Red'])/(df['NIR'] + df['Red'] + 0.5)
     df['BSI'] = ((df['Red'] + df['SWIR_1']) - (df['NIR'] + df['Blue']))/(df['Red'] + df['SWIR_1'] + df['NIR'] + df['Blue'])
     df['NDPI'] = (df['NIR'] - (0.56*df['Red'] + 0.44*df['SWIR_2']))/(df['NIR'] + 0.56*df['Red'] + 0.44*df['SWIR_2'])
+    df['NDGI'] = ((0.688*df['Green']) + (0.312*df['NIR']) - df['Red']) / ((0.688*df['Green']) + (0.312*df['NIR']) + df['Red'])
     df['NDSI'] = (df['Green'] - df['SWIR_1'])/(df['Green'] + df['SWIR_1'])
     return df
 
@@ -153,7 +154,7 @@ def interpolate_group(group):
         group[['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').first().values.sum()
         group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
         integrals = growth_period[(growth_period.NDWI <= 0.5) & (growth_period.NDVI >= 0.2)]
-        integrals = integrals[cols[:6] + cols[-7:]].sum()
+        integrals = integrals[cols[:6] + cols[-8:]].sum()
         for integral in integrals.keys():
             group['d'+integral] = integrals[integral]
         # actively growing vegetation is when NDVI >= 0.2
@@ -163,7 +164,7 @@ def interpolate_group(group):
         group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
         group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
         group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
-        group.drop((cols[:6] + cols[-7:] + ['Month', 'dNDSI', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
+        group.drop((cols[:6] + cols[-8:] + ['Month', 'dNDSI', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
         return group.head(1)
     except:
         return pd.DataFrame()
@@ -225,7 +226,8 @@ def calculateIndices(image):
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
-    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndpi])
+    ndgi = image.expression("((0.688 * Green) + (0.312 * NIR) - RED) / ((0.688 * Green) + (0.312 * NIR) + RED)", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'Green': image.select('Green')}).rename('NDGI')
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndpi, ndgi])
 
 
 def loadYearCollection(year):
@@ -332,8 +334,8 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         lith = lithology.clip(shapefile_bbox)
     # filter for summer and fall and calculate indices
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
-    landsat_June = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
-    landsat_Sept = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
+    landsat_June = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
+    landsat_Sept = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
     combined_image, residue_image = None, None
     noBands, bandnames1, threshold = allBands, 0, np.ceil((1024 - allBands)/recurringBands)
     noImages = len(dates)
@@ -501,8 +503,8 @@ lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinea
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx', 'srad'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'Lithology', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
-recurringBands, allBands = len(cols[:12]), len(cols[:-9])
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'Lithology', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI', 'NDSI']
+recurringBands, allBands = len(cols[:12]), len(cols[:-10])
 G_driveAccess()
 allIds = shapefile.ID
 current_time = datetime.strptime('09/25/2025', '%m/%d/%Y').timestamp()*1000

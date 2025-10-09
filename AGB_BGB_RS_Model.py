@@ -55,7 +55,7 @@ def calculateIndices(image):
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
-    ndgi = image.expression("((0.688 * Green) + (0.312 * NIR) - RED) / ((0.688 * Green) + (0.312 * NIR) - RED)", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'Green': image.select('Green')}).rename('NDGI')
+    ndgi = image.expression("((0.688 * Green) + (0.312 * NIR) - RED) / ((0.688 * Green) + (0.312 * NIR) + RED)", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'Green': image.select('Green')}).rename('NDGI')
     return image.addBands([ndvi, ndwi, evi, savi, bsi, ndsi, ndpi, ndgi])
 
 
@@ -211,7 +211,6 @@ flow, slope, elevation, wet, snowy, S_Rad, AGD = [], [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
-# populate bands by applying above functions for each pixel in dataframe
 for idx in range(data.shape[0]):
     # extract coordinates and date from csv
     x, y = data.loc[idx, ['Longitude', 'Latitude']]
@@ -232,6 +231,51 @@ for idx in range(data.shape[0]):
     if not integrals['Blue']:   # if integrals are null (probably from null band values), assign zero to them
         for band in integrals.index:
             integrals[band] = 0
+    
+    # compute band values: daymetv4 (1km resolution) can also be used for SWE
+    mycrs = 'EPSG:326' + str(utm)
+    if mycrs == "EPSG:32611":
+        tclimate = terraclimate_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        srad = gridmet_11.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
+        snow_we = terraclimate_11.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
+        tvalues = gridmet_11.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
+        elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_clay = shallow_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_clay = deep_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_hydra = shallow_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_hydra = deep_hydra_cond_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_sand = shallow_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+    else:
+        tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
+        srad = gridmet.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
+        snow_we = terraclimate.filterBounds(point).filterDate(year + '-04-01', year + '-05-01').first()
+        tvalues = gridmet.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").mean()
+        elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
+        slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
+        flow_value = flow_acc.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_clay = shallow_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_clay = deep_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_hydra = shallow_hydra_cond.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_hydra = deep_hydra_cond.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shallow_sand = shallow_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        
+    swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+    tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    mean_pr = tclimate['pr']
+    cdef_value = 0.1*tclimate['def']
+    aet = 0.1*tclimate['aet']
+    temps = tvalues.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    rad = srad.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['srad']
+    tmin = temps['tmmn']
+    tmax = temps['tmmx']
     
     NDWI_Summer.append(bands_June['NDWI'])
     EVI_Summer.append(bands_June['EVI'])
@@ -263,7 +307,27 @@ for idx in range(data.shape[0]):
     
     wet.append(wet_days)
     snowy.append(snow_days)
+    mean_annual_pr.append(mean_pr)
+    flow.append(flow_value)
+    elevation.append(elev)
+    slope.append(slope_value)
+    swe.append(swe_value)
+    et.append(aet)
+    cdef.append(cdef_value)
+    min_temp.append(tmin)
+    max_temp.append(tmax)
+    S_Rad.append(rad)
     AGD.append(growth_days)
+    
+    Shallow_Clay.append(shallow_clay)
+    Shallow_Sand.append(shallow_sand)
+    Shallow_Hydra.append(np.power(10, shallow_hydra))
+    Lithology.append(lith)
+    Deep_Clay.append(deep_clay)
+    Deep_Sand.append(deep_sand)
+    Deep_Hydra.append(np.power(10, deep_hydra))
+    Organic_Matter.append(np.power(10, shall_org))
+    
     if idx%20 == 0: print(idx, end=' ')
 
 # checks if they are all cloud free (should equal data.shape[0])
@@ -337,7 +401,6 @@ from sklearn.inspection import PartialDependenceDisplay
 from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 import matplotlib.pyplot as plt
-import numpy as np
 
 # read csv containing random samples
 data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
@@ -355,7 +418,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'dNDGI', 'NDGI_June', 'NDGI_Sept', 'Minimum_temperature', 'Maximum_temperature']]
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -417,7 +480,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.03, max_depth=14, n_estimators=500, subsample=0.6, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
@@ -428,8 +491,8 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.03, max_depth=14, n_estimators=500,
-                                         subsample=0.9, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.05, max_depth=14, n_estimators=200,
+                                         subsample=0.4, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
                                          verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
@@ -551,7 +614,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in list(cols[17:-8]) if c not in ['dNDSI', 'Wet_days', 'Cdef', 'Flow']]  # for the 5-year averaged data
+var_col =  [c for c in list(cols[19:-9]) if c not in ['dNDSI', 'Snow_days', 'Cdef', 'Flow', 'Minimum_temperature', 'Maximum_temperature']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -607,10 +670,10 @@ train_data['AGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=10, n_estimators=150, subsample=1.0, validation_fraction=0.2,
+agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.05, alpha=0.8413, max_depth=10, 
-                                      n_estimators=150, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.25, alpha=0.8413, max_depth=13, 
+                                      n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
