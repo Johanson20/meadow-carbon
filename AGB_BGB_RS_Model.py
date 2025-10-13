@@ -672,8 +672,8 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.25, alpha=0.8413, max_depth=13, 
-                                      n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
+agb_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.1, alpha=0.8413, max_depth=14, 
+                                      n_estimators=2000, subsample=0.4, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
