@@ -163,7 +163,7 @@ def interpolate_group(group):
         group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']] = resp
         group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
         group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
-        group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
+        # group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
         group.drop((cols[:6] + cols[-8:] + ['Month', 'dNDSI', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
         return group.head(1)
     except:

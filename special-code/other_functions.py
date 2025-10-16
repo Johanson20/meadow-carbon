@@ -261,6 +261,8 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
         out_grd = out_grd.rio.reproject(mycrs)
         out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
         out_grd.rio.to_raster((inputdir[:11] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
+        gdf.drop(attribute, axis=1, inplace=True)
+        df.drop(attribute, axis=1, inplace=True)
         print(attribute, "done!")
 
 # splitCSVToGeotiffs("files/2021_Meadows.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])

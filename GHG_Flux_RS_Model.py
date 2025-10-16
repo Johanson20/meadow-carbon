@@ -318,8 +318,8 @@ grid.best_params_
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
 ghg_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=7, n_estimators=5000, subsample=1.0, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-ghg_84_model = GradientBoostingRegressor(loss="quantile", learning_rate=0.02, alpha=0.8413, max_depth=10, 
-                                      n_estimators=2000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
+ghg_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.02, max_depth=7, 
+                                      n_estimators=5000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=50,  
                                       max_features='log2', random_state=10)
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)
