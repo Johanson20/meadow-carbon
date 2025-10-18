@@ -183,7 +183,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                     df.columns = ['Y', 'X', variable]
                 # extract summary statistics
                 stats = df[variable].describe().values
-                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[2:5]) + [stats[-1]]
+                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
                 gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
                 df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
                 all_data = pd.concat([all_data, df])
@@ -212,14 +212,17 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                 val = [file.split("_")[2][:-4], df.shape[0]]
                 for col in all_data.columns[2:]:
                     stats = df[col].describe().values
-                    val.extend(list(stats[2:5]) + [stats[-1]])
+                    val.extend(list(stats[1:4]) + [stats[-1]])
                 stats_df.loc[len(stats_df)] = val
             else:
                 stats = df[variable].describe().values
-                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[2:5]) + [stats[-1]]
+                stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
+        # drop stats about raw biomass components
+        stats_df.drop(stats_df.columns[10:26], axis=1, inplace=True)
+        stats_df.drop(['1SD_Rh_std', '1SD_ANPP_std', '1SD_BNPP_std', '1SD_NEP_std'], axis=1, inplace=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
         all_data.to_csv(outfile, index=False)

@@ -147,11 +147,10 @@ def interpolate_group(group):
         # filter days before 7/15 where NDVI ratio > 0.2, and days from 7/15 where it is greater than 0.6
         group['Active_growth_days'] = sum(growthdays.loc[start_year:str(year-1)+'-12-31', 'NDVI_Ratio'] > 0.6) + sum(growthdays.loc[str(year)+'-07-15':end_year, 'NDVI_Ratio'] > 0.6) + sum(growthdays.loc[str(year)+'-01-01':str(year)+'-07-14', 'NDVI_Ratio'] > 0.2)
         # snow days is defined as NDSI > 0.2; water covered is defined as snow days with NDWI > 0.5
-        group['Snow_days'] = len(date_range) - growth_period.shape[0]
         group['Wet_days'] = growth_period[growth_period.NDWI > 0.5].shape[0]
         group['Month'] = group.index.month
         group.loc[:, ['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').ffill().bfill()
-        group[['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').first().values.sum()
+        group[['AET', 'Annual_Precipitation']] = group.loc[:, ['Month', 'AET', 'Annual_Precipitation']].groupby('Month').first().sum()
         group[['Minimum_temperature', 'Maximum_temperature']] = group[['Minimum_temperature', 'Maximum_temperature']].groupby(group.index.month).transform('mean')
         integrals = growth_period[(growth_period.NDWI <= 0.5) & (growth_period.NDVI >= 0.2)]
         integrals = integrals[cols[:6] + cols[-8:]].sum()
@@ -163,7 +162,6 @@ def interpolate_group(group):
         group.loc[group['NDVI'] >= 0.2, ['CO2.umol.m2.s', '1SD_CO2']] = resp
         group.loc[:, ['Rh', '1SD_Rh']] = [sum(group['CO2.umol.m2.s']), sum(group['1SD_CO2'])]
         group.loc[:, ['Rh', '1SD_Rh']] *= 12.01*60*60*24/1e6
-        # group['Snow_Flux'] = sum(group.loc[group['NDSI'] > 0.2, 'CO2.umol.m2.s'])*12.01*60*60*24/1e6
         group.drop((cols[:6] + cols[-8:] + ['Month', 'dNDSI', 'CO2.umol.m2.s', '1SD_CO2']), axis=1, inplace=True)
         return group.head(1)
     except:
@@ -615,7 +613,6 @@ def processMeadow(meadowCues):
         
         if not all_data.empty:
             all_data = makePredictions(all_data)
-            all_data[['Meadow_ID', 'Water_Year']] = meadowId, year
             # make geodataframe of predictions and projected coordinates as crs; convert to raster
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
