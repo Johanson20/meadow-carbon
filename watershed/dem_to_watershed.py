@@ -23,7 +23,7 @@ os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 
 # Specify the folder containing raster files and open them as datasets
 raster_files = glob.glob("files/usgs_10m*.tif")

@@ -62,7 +62,7 @@ import numpy as np
 
 # read csv containing random samples
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-06-06.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 data = pd.read_csv("csv/meadow_ID_training_data.csv")
 cols = data.columns
 # remove irrelevant columns for ML and determine X and Y variables

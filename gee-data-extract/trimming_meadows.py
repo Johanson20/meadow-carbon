@@ -11,7 +11,7 @@ os.chdir("Code")
 # ee.Authenticate()
 ee.Initialize()
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp")
 
 # examine a single meadow for its properties (just for learning)
 feature = shapefile.iloc[4].geometry

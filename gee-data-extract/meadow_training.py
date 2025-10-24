@@ -53,7 +53,7 @@ def randomPolygonPoint(polygon):
 
 # read in meadows shapefile and buffer by 1km; relevant datasets are landsat, elevation and flow accumulation data
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-06-06.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 combined_meadows = meadows.union_all()
 # Spatial resolutions: landsat is 30m, flow is 463.83m, elevation is 10.2m 
 landsat9_collection = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])

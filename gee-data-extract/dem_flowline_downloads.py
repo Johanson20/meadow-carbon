@@ -39,7 +39,7 @@ def G_driveAccess():
 
 G_driveAccess()
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 
 # download 10m USGS DEM
 USGS_dem = ee.Image("USGS/3DEP/10m").select('elevation')

@@ -11,7 +11,7 @@ os.chdir("Code")    # change path to directory of folder
 ee.Initialize()
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp")
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp")
 
 import geemap
 import ipyleaflet
