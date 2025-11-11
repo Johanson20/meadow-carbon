@@ -220,9 +220,8 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
-        # drop stats about raw biomass components
-        stats_df.drop(stats_df.columns[10:26], axis=1, inplace=True)
-        stats_df.drop(['1SD_Rh_std', '1SD_ANPP_std', '1SD_BNPP_std', '1SD_NEP_std'], axis=1, inplace=True)
+        if "," in variable:
+            stats_df.drop(['1SD_Rh_std', '1SD_ANPP_std', '1SD_BNPP_std', '1SD_NEP_std'], axis=1, inplace=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
         all_data.to_csv(outfile, index=False)

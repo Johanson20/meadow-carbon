@@ -177,6 +177,7 @@ def makePredictions(df):
     df['CO2.umol.m2.s'] = ghg_model.predict(df.loc[:, ghg_col])
     sd_ghg = ghg_84_model.predict(df.loc[:, ghg_sd_col])
     df['1SD_CO2'] = abs(sd_ghg - df['CO2.umol.m2.s'])
+    del sd_ghg
     df.loc[df['CO2.umol.m2.s'] < 0, 'CO2.umol.m2.s'] = 0
     df = df.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
     rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
@@ -186,15 +187,18 @@ def makePredictions(df):
     df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
     sd_agb = agb_84_model.predict(df.loc[:, agb_sd_col])
     df['1SD_ANPP'] = abs(sd_agb - df['HerbBio.g.m2'])
+    del sd_agb
     sd_bgb = bgb_84_model.predict(df.loc[:, bgb_sd_col])
     bgb_sd = abs(sd_bgb - df['Roots.kg.m2'])
     df.loc[df['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+    del sd_bgb
     df.loc[df['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
     df['Root_Turnover'] = (df['Roots.kg.m2']*0.49 - ((df['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
     df['Root_Exudates'] = df['Roots.kg.m2']*1000*df['Active_growth_days']*12*1.04e-4
     df['BNPP'] = df['Root_Turnover'] + df['Root_Exudates']
     df['ANPP'] = df['HerbBio.g.m2']*0.433
     df['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*df['Active_growth_days']*12*0.104
+    del bgb_sd
     anpp_draws = np.random.normal(df['ANPP'].to_frame(), df['1SD_ANPP'].to_frame(), size=(len(df['ANPP']), 100))
     bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
     df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
@@ -609,7 +613,7 @@ def processMeadow(meadowCues):
             df = processGeotiff(df)
             all_data = pd.concat([all_data, df])
             df = pd.DataFrame()
-        all_data.head()
+        del bandnames, bandnames1
         
         if not all_data.empty:
             all_data = makePredictions(all_data)
@@ -626,7 +630,9 @@ def processMeadow(meadowCues):
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd = out_grd.rio.reproject(epsg_crs)
                 out_grd.rio.to_raster(out_raster)
+            del gdf, out_grd, pixel_values, utm_lats, utm_lons
             all_data.to_csv(f'{outputname}.csv', index=False)
+            del all_data
         else:
             meadowId = -2  # if all_data is an empty dataframe
         
@@ -646,7 +652,7 @@ if __name__ == "__main__":
     for year in years[-6:-1]:   # modify the indexes
         start = datetime.now()
         loadYearCollection(year)
-        with multiprocessing.Pool(processes=60) as pool:
+        with multiprocessing.Pool(processes=60, maxtasksperchild=50) as pool:
             bandresult = pool.map(prepareMeadows, allIds)
         with open(f'files/{year}/bandresult.pckl', 'wb') as f:
             pickle.dump(bandresult, f)
@@ -661,7 +667,7 @@ if __name__ == "__main__":
             bandresult = pickle.load(f)
         meadowData = list(zip(allIds, bandresult))
         tasks = [task for task in tasks if str(year) in task.config['description']]
-        with multiprocessing.Pool(processes=60) as pool:
+        with multiprocessing.Pool(processes=60, maxtasksperchild=1) as pool:
             result = pool.map(processMeadow, meadowData)
         with open(f'files/{year}/finalresult.pckl', 'wb') as f:
             pickle.dump(result, f)
