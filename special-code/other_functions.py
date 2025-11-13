@@ -160,7 +160,7 @@ allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
     into one file (geotiff, vrt and/or csv)'''
-    variable = endname.split(".")[0]
+    variable = endname[:-4] if "," in endname else endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable])
     stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
     
@@ -202,18 +202,20 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             statCol = ['ID', 'PixelCount']
             for col in mycols:
                 statCol.extend([col+"_mean", col+"_std", col+"_min", col+"_max"])
-            stats_df = pd.DataFrame(columns=statCol)
+            stats_df = pd.DataFrame(columns=(statCol + ["NEP_sum", "Jepson_Region"]))
         all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
         for file in all_files:
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df = pd.read_csv(file)
             df = df.loc[:, (['Y', 'X'] + mycols)] if "," in variable else df.loc[:, ['Y', 'X', variable]]
             if "," in variable:
-                val = [file.split("_")[2][:-4], df.shape[0]]
+                meadowId = int(file.split("_")[2][:-4])
+                jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
+                val = [meadowId, df.shape[0]]
                 for col in all_data.columns[2:]:
                     stats = df[col].describe().values
                     val.extend(list(stats[1:4]) + [stats[-1]])
-                stats_df.loc[len(stats_df)] = val
+                stats_df.loc[len(stats_df)] = val + [stats[0]*stats[1], jepson]
             else:
                 stats = df[variable].describe().values
                 stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
@@ -221,7 +223,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
         if "," in variable:
-            stats_df.drop(['1SD_Rh_std', '1SD_ANPP_std', '1SD_BNPP_std', '1SD_NEP_std'], axis=1, inplace=True)
+            stats_df.drop(stats_df.columns[-16:], axis=1, inplace=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
         all_data.to_csv(outfile, index=False)
@@ -240,8 +242,8 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
         out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
 
+# mergeToSingleFile("files/2021", "files/2021_Meadows.csv", "['Annual_Precipitation', 'AET', 'Active_growth_days', 'Elevation', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh'].csv")
 # mergeToSingleFile("files/2023", "files/merged_BNPP.csv", "NEP.csv")
-# mergeToSingleFile("files/2021", "files/2021_Meadows.csv", "['NEP','ANPP','BNPP','Rh'].csv")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
 # mergeToSingleFile("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)

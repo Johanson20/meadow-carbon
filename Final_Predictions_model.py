@@ -672,5 +672,28 @@ if __name__ == "__main__":
         with open(f'files/{year}/finalresult.pckl', 'wb') as f:
             pickle.dump(result, f)
         print(f"Year {year} completed in {datetime.now() - start}")
-    
-    shapefile = None
+
+'''
+# Clean up operation for unprocessed meadows
+import glob
+from joblib import Parallel, delayed
+
+years = range(1984, 2025)
+shps = shapefile.copy()
+for year in years:
+    start = datetime.now()
+    loadYearCollection(year)
+    all_files = [f for f in glob.glob(f"files/bands/{year}/*_0.tif")]
+    all_files = [int(x.split("_")[2]) for x in all_files]
+    processed = [f for f in glob.glob(f"files/{year}/*.csv")]
+    processed = [x.split("_")[2] for x in processed]
+    processed = [int(x[:-4]) for x in processed]
+    diff = list(set(all_files).difference(set(processed)))
+    shapefile = shps.copy()
+    shapefile = shapefile[shapefile.ID.isin(diff)]
+    allIds = list(shapefile.ID)
+    print(f"{len(allIds)}:", end=' ')
+    with Parallel(n_jobs=16, prefer="processes") as parallel:
+        result = parallel(delayed(processMeadow)(meadowId) for meadowId in allIds)
+    print(f"Year {year} completed in {datetime.now() - start}")
+'''
