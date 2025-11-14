@@ -215,7 +215,8 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                 for col in all_data.columns[2:]:
                     stats = df[col].describe().values
                     val.extend(list(stats[1:4]) + [stats[-1]])
-                stats_df.loc[len(stats_df)] = val + [stats[0]*stats[1], jepson]
+                    if col == 'NEP': nep_sum = 900*stats[0]*stats[1]
+                stats_df.loc[len(stats_df)] = val + [nep_sum, jepson]
             else:
                 stats = df[variable].describe().values
                 stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
@@ -223,7 +224,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             all_data = pd.concat([all_data, df])
         if "," in variable:
-            stats_df.drop(stats_df.columns[-16:], axis=1, inplace=True)
+            stats_df.drop(stats_df.columns[-18:-2], axis=1, inplace=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
         all_data.to_csv(outfile, index=False)
