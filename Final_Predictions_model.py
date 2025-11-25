@@ -76,7 +76,10 @@ def geotiffToDataFrame(input_raster, bandnames):
     # repeat the other columns throughout length of dataframe
     n = int(out_df.shape[0]/nrows)
     for col in range((recurringBands + 1), (allBands + 1)):
-        out_df[bandnames[col-1]] = list(df[col])*n
+        if col in colBands:
+            out_df[bandnames[col-1]] = list(df[col])*n
+        else:
+            out_df[bandnames[col-1]] = [np.nan]*out_df.shape[0]
     out_df['x'] = list(df['x'])*n
     out_df['y'] = list(df['y'])*n
     return out_df
