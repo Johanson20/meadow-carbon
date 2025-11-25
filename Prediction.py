@@ -540,7 +540,7 @@ def processMeadow(meadowCues):
         return -4
 
 '''
-meadowIdx = 15346   # 15314 (largest), 16079 (smallest)
+meadowId = 15508   # 16973 (largest), 16247 (smallest)
 noBands = prepareMeadows(meadowIdx)
 processMeadow((meadowIdx, noBands))
 '''
