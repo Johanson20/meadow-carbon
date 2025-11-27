@@ -18,6 +18,7 @@ import rasterio
 import rioxarray as xr
 import ee
 import geemap
+from matplotlib.colors import ListedColormap
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from geocube.api.core import make_geocube
@@ -624,11 +625,11 @@ def processMeadow(meadowCues):
             utm_lons, utm_lats = all_data['X'], all_data['Y']
             res = 30
             out_rasters = [['ANPP.tif', 'ANPP'], ['BNPP.tif', 'BNPP'], ['Rh.tif', 'Rh'], ['NEP.tif', 'NEP'], ['1SD_ANPP.tif', '1SD_ANPP'], ['1SD_BNPP.tif', '1SD_BNPP'], ['1SD_Rh.tif', '1SD_Rh'], ['1SD_NEP.tif', '1SD_NEP']]
-            for i in range(8):
+            for i in range(4):
                 response_col = out_rasters[i][1]
                 pixel_values = all_data[response_col]
                 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=mycrs).to_crs(3310)
-                gdf.plot(column=response_col, cmap='viridis', legend=True)
+                gdf.plot(column=response_col, cmap=ListedColormap(['#FF0000', '#FFFF00', '#00FFFF', '#0000FF']), legend=True)
                 out_raster = f'{outputname}_{out_rasters[i][0]}'
                 out_grd = make_geocube(vector_data=gdf, measurements=gdf.columns.tolist()[:-1], resolution=(-res, res))
                 out_grd = out_grd.rio.reproject(epsg_crs)

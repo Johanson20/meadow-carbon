@@ -161,7 +161,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
     '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
     into one file (geotiff, vrt and/or csv)'''
     variable = endname[:-4] if "," in endname else endname.split(".")[0]
-    all_data = pd.DataFrame(columns=['Y', 'X', variable])
+    all_data = pd.DataFrame(columns=['Y', 'X', variable, 'ID', 'Jepson_Region'])
     stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
     
     if endname.endswith(".tif"):
@@ -197,7 +197,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
     elif endname.endswith(".csv"):
         if "," in variable:
             mycols = ast.literal_eval(variable)
-            all_data = pd.DataFrame(columns=['Y', 'X'] + mycols)
+            all_data = pd.DataFrame(columns=['Y', 'X'] + mycols + ['ID', 'Jepson_Region', 'NEP_Cap_1000'])
             # create summary statistics dataframe for each variable
             statCol = ['ID', 'PixelCount']
             for col in mycols:
@@ -208,9 +208,9 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df = pd.read_csv(file)
             df = df.loc[:, (['Y', 'X'] + mycols)] if "," in variable else df.loc[:, ['Y', 'X', variable]]
+            meadowId = int(file.split("_")[2][:-4])
+            jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
             if "," in variable:
-                meadowId = int(file.split("_")[2][:-4])
-                jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
                 val = [meadowId, df.shape[0]]
                 for col in all_data.columns[2:]:
                     stats = df[col].describe().values
@@ -222,6 +222,8 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                 stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
+            df[['ID', 'Jepson_Region']] = meadowId, jepson
+            df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
             all_data = pd.concat([all_data, df])
         if "," in variable:
             stats_df.drop(stats_df.columns[-18:-2], axis=1, inplace=True)

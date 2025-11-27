@@ -153,13 +153,16 @@ landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskCloud)
-
+landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
+modis_npp = ee.ImageCollection("UMT/NTSG/v2/MODIS/NPP") .select('annualNPP').map(resample10)
+modis_npp_11 = ee.ImageCollection("UMT/NTSG/v2/MODIS/NPP") .select('annualNPP').map(resample11)
 # flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); gridmet/terraclimate (4,638.3m resolution)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
+
 '''
 dem = ee.ImageCollection('USGS/3DEP/10m_collection').mosaic().select('elevation')
 dem_11 = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
@@ -168,6 +171,7 @@ slopeDem = ee.Terrain.slope(dem)
 slopeDem_11 = ee.Terrain.slope(dem_11)
 dem, dem_11 = dem.setDefaultProjection("EPSG:4326"), dem_11.setDefaultProjection("EPSG:4326")
 '''
+
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample10)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample10)
@@ -207,7 +211,7 @@ dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
 dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI, dNDGI = [], [], [], [], [], [], [], []
 NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer, NDGI_Summer = [], [], [], [], [], []
 NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall, NDGI_Fall = [], [], [], [], [], []
-flow, slope, elevation, wet, snowy, S_Rad, AGD = [], [], [], [], [], [], []
+flow, slope, elevation, wet, snowy, S_Rad, AGD, modisNPP, landsatNPP, = [], [], [], [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
 
@@ -250,6 +254,7 @@ for idx in range(data.shape[0]):
         deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         shall_org = shallow_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
+        modisVal = modis_npp_11.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     else:
         tclimate = terraclimate.filterBounds(point).filterDate(str(int(year)-1)+"-10-01", year+"-10-01").sum()
         srad = gridmet.filterBounds(point).filterDate(year+"-06-01", year+"-08-31").sum()
@@ -266,7 +271,9 @@ for idx in range(data.shape[0]):
         deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         shall_org = shallow_organic_m.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-        
+        modisVal = modis_npp.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
+    
+    landsatNppVal = landsat_npp.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), point, 30).getInfo()        
     swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
     tclimate = tclimate.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()
     mean_pr = tclimate['pr']
@@ -318,6 +325,8 @@ for idx in range(data.shape[0]):
     max_temp.append(tmax)
     S_Rad.append(rad)
     AGD.append(growth_days)
+    modisNPP.append(modisVal['annualNPP']*0.1)  # convert to gC/m2 with scale factor
+    landsatNPP.append(landsatNppVal['annualNPP']*0.1)
     
     Shallow_Clay.append(shallow_clay)
     Shallow_Sand.append(shallow_sand)
@@ -374,6 +383,8 @@ data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 data['SRad'] = S_Rad
 data['Active_growth_days'] = AGD
+data['ModisNPP'] = modisNPP
+data['LandsatNPP'] = landsatNPP
 
 data['Shallow_Clay'] = Shallow_Clay
 data['Deep_Clay'] = Deep_Clay
