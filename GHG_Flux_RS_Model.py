@@ -369,11 +369,11 @@ test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
-print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
-print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
-print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient matrix (R) = {:.4f}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient (R) = {:.4f}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = ghg_model.feature_importances_
@@ -397,7 +397,7 @@ def plotY():
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title(f"Test set (y_test); R = {np.round(test_corr[0][1], 4)}")
+    plt.title("GHG Plot for Test data")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
