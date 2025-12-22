@@ -55,25 +55,27 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
     try:
         # filter landsat images by location
         spatial_filtered = landsat.filterBounds(shapefile_bbox)
-        nppVal = landsat_npp.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
+        try:
+            nppVal = landsat_npp.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
+        except:
+            nppVal = None
         # filter the images by dates on or bufferDays before fire date
         temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), target_date)
         # Sort the images by closest date to fire date and create an image list to loop through if there are valid images
         sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
         image_list = sorted_collection.toList(sorted_collection.size())
         noImages = image_list.size().getInfo()
-        nImage, band_values = 0, {'NDWI': None}
+        nImage, band_values = 0, {'NDWI_mean': None}
+        reducerFunc = (ee.Reducer.mean().combine(ee.Reducer.median(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True))
         
         # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
-        while band_values['NDWI'] == None and nImage < noImages:
+        while band_values['NDWI_mean'] == None and nImage < noImages:
             nearest_image = calculateIndices(ee.Image(image_list.get(nImage)))
             nImage += 1
             properties = nearest_image.getInfo()['properties']
-            band_values = nearest_image.reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
+            band_values = nearest_image.reduceRegion(reducerFunc, shapefile_bbox, 30).getInfo()
         
-        median_values = nearest_image.reduceRegion(ee.Reducer.median(), shapefile_bbox, 30).getInfo()
-        std_values = nearest_image.reduceRegion(ee.Reducer.stdDev(), shapefile_bbox, 30).getInfo()
-        return [list(band_values.values()), list(median_values.values()), list(std_values.values()), nppVal, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
+        return [list(band_values.values()), nppVal, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
     except:     # if there was error in retrieving values due to no data available within dates
         return []
 
@@ -93,11 +95,11 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 
 # create empty dataframe, one for each meadow
-meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Image_Date',
-            'Image_Time', 'Days_Difference', 'LandsatNPP', 'BSI_mean', 'EVI_mean', 'NDWI_mean', 'BSI_median',
-            'EVI_median', 'NDWI_median', 'BSI_std', 'EVI_std', 'NDWI_std'])
+meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date',
+            'Image_Date', 'Image_Time', 'Days_Difference', 'LandsatNPP', 'BSI_mean', 'BSI_median', 'BSI_std',
+            'EVI_mean','EVI_median', 'EVI_std', 'NDWI_mean', 'NDWI_median', 'NDWI_std'])
 
-for meadowIdx in range(len(meadows.shape[0])):
+for meadowIdx in range(meadows.shape[0]):
     # extract a single meadow and it's geometry bounds;
     feature = meadows.loc[meadowIdx, :]
     if feature.geometry.geom_type == 'Polygon':
@@ -115,11 +117,11 @@ for meadowIdx in range(len(meadows.shape[0])):
         continue
     
     # extract the meadow values and append to dataframe
-    mean_values, median_values, stdevs, nppVal, time_diff, image_date, image_time = meadow_values 
+    band_values, nppVal, time_diff, image_date, image_time = meadow_values 
     meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, image_date, image_time, 
-                                      time_diff, nppVal] + mean_values + median_values + stdevs
-    # print progress for every 100 meadows processed
-    if meadowIdx%100 == 0: print(meadowIdx, end=' ')
+                                      time_diff, nppVal] + band_values
+    # print progress for every 20 meadows processed
+    if meadowIdx%20 == 0: print(meadowIdx, end=', ')
 
 # check how many meadows had data successfully extracted
 len([x for x in meadow_data['BSI_mean']])
