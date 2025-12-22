@@ -63,29 +63,6 @@ with PdfPages('files/Largest.pdf') as pdf:
     pdf.savefig(fig)
     plt.close(fig)
 
-myvars = agb_model.feature_names_in_
-myvars[9:11] = ['Min_temperature', 'Max_temperature']
-with PdfPages('files/AGB_AGU_Plot.pdf') as pdf:
-    fig, ax = plt.subplots(figsize=(10, 8))
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(myvars)[sorted_idx])
-    plt.title("Feature Importance of AGB Model")
-    pdf.savefig(fig)
-    plt.close(fig)
-
-def plotY():
-    plt.scatter(y_test, y_test_pred, color='g')
-    plt.plot(y_test, y_pred, color='k', label='Regression line')
-    plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
-    plt.xlabel('Actual ' + y_field)
-    plt.ylabel("Predicted " + y_field)
-    plt.title(f"BGB Plot for Test data")
-    axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
-    plt.xlim((0, axes_lim))
-    plt.ylim((0, axes_lim))
-    plt.legend()
-plotY()
-
 
 data = pd.read_csv("csv/Aboveground Biomass_RS Model_5_year_Data.csv")
 BNPPs, ANPPs = [], []
@@ -265,15 +242,21 @@ with plt.style.context('default'):
 df = pd.DataFrame({'Training_Data': list(data2['NPP']), 'Modis': list(data2['ModisNPP_x']), 'Landsat': list(data2['LandsatNPP_x'])})
 df.to_csv("files/NPP_comparison.csv", index=False)
 
+df = pd.read_csv("files/GHG_var_importance.csv")
+feat_imp = df['Importance']
+sorted_idx = np.argsort(feat_imp)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
 with plt.style.context('default'):
     fig, ax = plt.subplots(figsize=(10, 10))
-    ax.barh(pos, feat_imp[sorted_idx], align="center")
+    ax.barh(pos, feat_imp, align="center")
     ax.set_yticks(pos)
-    ax.set_yticklabels(np.array(ghg_model.feature_names_in_)[sorted_idx], fontsize=14, fontweight='bold')
+    ax.set_yticklabels(np.array(df['Variable']), fontsize=14, fontweight='bold')
     for label in ax.get_xticklabels():
         label.set_fontsize(14)
         label.set_fontweight('bold')
-    ax.set_title("Feature Importance of GHG Model", fontsize=16, fontweight='bold')
+    ax.set_title("Heterotrophic Respiration", fontsize=16, fontweight='bold')
+    # ax.set_title("Belowground Biomass", fontsize=16, fontweight='bold')
+    ax.set_xlabel("Importance", fontsize=18, fontweight='bold')
     fig.tight_layout()
     fig.savefig("files/GHG_importance.png", dpi=300)
     plt.close(fig)
