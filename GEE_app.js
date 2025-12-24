@@ -1,12 +1,13 @@
 // List of attributes and years prepared as objects from assets
-var assets = {"1984": {"Active Growth Days": AGD_1984, "AET (Annual Evapotranspiration)": AET_1984, "Annual Precipitation": Precip_1984,
+var assets = {
+              /*"1984": {"Active Growth Days": AGD_1984, "AET (Annual Evapotranspiration)": AET_1984, "Annual Precipitation": Precip_1984,
               "ANPP (Aboveground Net Primary Productivity)": ANPP_1984, "ANPP StdErr": ANPP_SD_1984, "BNPP (Belowground Net Primary Productivity)": BNPP_1984,
               "BNPP StdErr": BNPP_SD_1984, "Elevation (m)": Elev_1984, "NEP (Net Ecoystem Productivity)": NEP_1984, "NEP StdErr": NEP_SD_1984, "Rh (Respiration)": Rh_1984, "Rh StdErr": Rh_SD_1984},
               
               "1985": {"Active Growth Days": AGD_1985, "AET (Annual Evapotranspiration)": AET_1985, "Annual Precipitation": Precip_1985,
               "ANPP (Aboveground Net Primary Productivity)": ANPP_1985, "ANPP StdErr": ANPP_SD_1985, "BNPP (Belowground Net Primary Productivity)": BNPP_1985,
               "BNPP StdErr": BNPP_SD_1985, "Elevation (m)": Elev_1985, "NEP (Net Ecoystem Productivity)": NEP_1985, "NEP StdErr": NEP_SD_1985, "Rh (Respiration)": Rh_1985, "Rh StdErr": Rh_SD_1985},
-              
+              */
               "1986": {"Active Growth Days": AGD_1986, "AET (Annual Evapotranspiration)": AET_1986, "Annual Precipitation": Precip_1986,
               "ANPP (Aboveground Net Primary Productivity)": ANPP_1986, "ANPP StdErr": ANPP_SD_1986, "BNPP (Belowground Net Primary Productivity)": BNPP_1986,
               "BNPP StdErr": BNPP_SD_1986, "Elevation (m)": Elev_1986, "NEP (Net Ecoystem Productivity)": NEP_1986, "NEP StdErr": NEP_SD_1986, "Rh (Respiration)": Rh_1986, "Rh StdErr": Rh_SD_1986},
@@ -167,6 +168,8 @@ var assets = {"1984": {"Active Growth Days": AGD_1984, "AET (Annual Evapotranspi
 // extract years and create the selection panel
 var years = Object.keys(assets);
 var yearSelect = ui.Select({items: years, value: years[0], style: {margin: '0 0 6px 0', width: '100px', height: '40px'} });
+// set year to last year (2024)
+yearSelect.setValue(years[years.length - 1], true);
 var selectPanel = ui.Panel({style: {position: 'top-left', padding: '8px'}});
 selectPanel.add(ui.Label('Select Year/Attribute to Display', {fontWeight: 'bold'}));
 selectPanel.add(yearSelect);
@@ -180,6 +183,57 @@ Map.add(selectPanel);
 var legendPanel, currentImage, attri, yr;
 var pixelInfo = ui.Label('');
 var checkboxes;
+
+// add time series chart
+var yearTicks = years.map(function(y) {
+  return parseInt(y);
+});
+var chartPanel = ui.Panel({style: {width: '400px', position: 'bottom-right'}});
+Map.add(chartPanel);
+
+// generate 98th percentiles of each variable per year and use max of all years per variable
+var p98Lookup = {};
+Object.keys(assets[years[0]]).forEach(function(attr) {
+  var yearlyP98s = years.map(function(y) {
+    var img = ee.Image(assets[y][attr]);
+    return img.reduceRegion({
+      reducer: ee.Reducer.percentile([98]), geometry: img.geometry(), scale: 30, maxPixels: 1e13}).get('b1');});
+  p98Lookup[attr] = ee.Number(ee.List(yearlyP98s).reduce(ee.Reducer.max()));
+});
+
+// include variables and panels for displaying drawing capabilities and image download
+var drawingTools = Map.drawingTools();
+drawingTools.setShown(true);
+drawingTools.setDrawModes(['polygon']);
+var downloadPanel = ui.Panel({style: {position: 'top-right', padding: '4px', backgroundColor: 'rgba(255,255,255,0.9)'}});
+var downloadBtn = ui.Button({label: 'Download drawn area', onClick: handleDownload, style: {fontWeight: 'bold'}});
+downloadPanel.add(downloadBtn);
+// panel to include warnings about downloading drawn areas
+var msgPanel = ui.Panel({layout: ui.Panel.Layout.flow('vertical')});
+downloadPanel.add(msgPanel);
+Map.add(downloadPanel);
+
+// function to handle downloads of drawn areas
+function handleDownload() {
+  msgPanel.clear();
+  var layers = drawingTools.layers();
+  if (layers.length() === 0) {
+    msgPanel.add(ui.Label('Draw a polygon first!', {color: 'red', fontWeight: 'bold'}));
+    return;
+  }
+  var geom = layers.get(0).getEeObject();
+  // area limit (example: 100 km²)
+  geom.area().divide(1e6).evaluate(function(areaKm2) {
+    if (areaKm2 > 100) {
+      msgPanel.add(ui.Label('Selected area of ' + areaKm2.toFixed(3) + 'km2 is too large (limit: 100 km²)!', {color: 'red', fontWeight: 'bold'}));
+      return;
+    }
+    var url = currentImage.clip(geom).getDownloadURL({scale: 30, region: geom, crs: 'EPSG:4326'});
+    // user-controlled download (generates a download link for boundary drawn)
+    var link = ui.Label({value: 'Click here to download GeoTIFF', targetUrl: url, style: {color: 'blue'}});
+    msgPanel.add(link);
+  });
+}
 
 // create selection options for years and attributes
 function makeAttributeCheckboxes(year) {
@@ -227,58 +281,9 @@ function makeAttributeCheckboxes(year) {
   }
 }
 
-// function to update entire map layer when a year/attribute is changed
-function updateMap(year, attribute) {
-  Map.layers().reset();
-  var img = ee.Image(assets[year][attribute]);
-  
-  // Calculate min/max of attribute and round to the nearest 10
-  var stats = img.reduceRegion({reducer: ee.Reducer.percentile([1, 99]), geometry: img.geometry(), scale: 30, maxPixels: 1e13});
-  var minVal = ee.Number(stats.get('b1_p1')).round().divide(10).floor().multiply(10);
-  var maxVal = ee.Number(stats.get('b1_p99')).round().divide(10).ceil().multiply(10);
-  // Style points by selected attribute
-  var visParams = {palette: ['FF0000', 'FFFF00', '00FFFF', '0000FF']};
-  
-  //re-draw map with new layer after selection
-  minVal.evaluate(function(mini) {
-    maxVal.evaluate(function(maxi) {
-      Map.addLayer(img, {min: mini, max: maxi, palette: visParams.palette}, attribute);
-    });
-  });
-  // remove and redraw legend each time a new selection is made
-  if (legendPanel) Map.remove(legendPanel);
-  legendPanel = makeLegend(attribute, visParams, minVal, maxVal);
-  Map.add(legendPanel);
-  currentImage = img;
-  attri = attribute;
-}
-
-// if year is changed, regenerate the checkboxes (and updatemap)
-yearSelect.onChange(function(year) {
-  makeAttributeCheckboxes(year);
-});
-
-// set default year to first in order (1984)
-makeAttributeCheckboxes(years[0]);
-
-// function to extract attribute value for a particular year when pixel on map is clicked
-Map.onClick(function(coords) {
-  if (!currentImage) return;
-  // extract coordinates and pixel value when clicked
-  var point = ee.Geometry.Point(coords.lon, coords.lat);
-  var value = currentImage.sample(point, 30).first().get('b1');
-  
-  // display value at the top
-  value.evaluate(function(v) {
-    if (pixelInfo) Map.remove(pixelInfo);
-    var msg = attri + ' value at (' + coords.lon.toFixed(4) + ', ' + coords.lat.toFixed(4) + ') for ' + yr + ' = ' + (v).toFixed(3);
-    pixelInfo.setValue(msg);
-    Map.add(pixelInfo);
-  });
-});
-
 // create legend with range of values passed in
-function makeLegend(attribute, visParams, minVal, maxVal) {
+function makeLegend(attribute, visParams) {
+  // add color bar to legend
   var legend = ui.Panel({
     style: {position: 'bottom-left', padding: '8px', backgroundColor: 'white'}
   });
@@ -289,17 +294,83 @@ function makeLegend(attribute, visParams, minVal, maxVal) {
     style: {stretch: 'horizontal', margin: '8px 0'}
   });
   legend.add(colorBar);
-
-  // include min and max labels of legend
-  minVal.evaluate(function(min) {
-    maxVal.evaluate(function(max) {
-      legend.add(ui.Panel([ui.Label(min, {margin: '4px 8px', width: '60px'}), ui.Label('', {stretch: 'horizontal'}),
-        ui.Label(max, {margin: '4px 8px', width: '60px', textAlign: 'right'})], ui.Panel.Layout.flow('horizontal')));
-    });
+  // extract limit of legend scale
+  var maxVal = p98Lookup[attribute];
+  maxVal.evaluate(function(max) {
+    // include uniform min and max labels of legend and round to the nearest 10
+    max = Math.floor(max/10)*10;
+    var min = -max;
+    legend.add(ui.Panel([ui.Label(min, {margin: '4px 8px', width: '60px'}), ui.Label('', {stretch: 'horizontal'}),
+      ui.Label(0, {margin: '4px 8px', width: '60px', textAlign: 'center'}), ui.Label('', {stretch: 'horizontal'}),
+      ui.Label(max, {margin: '4px 8px', width: '60px', textAlign: 'right'})], ui.Panel.Layout.flow('horizontal')));
   });
-
   return legend;
 }
 
-// display map to appropriate zoom level (7) of entire region
+// function to update entire map layer when a year/attribute is changed
+function updateMap(year, attribute) {
+  Map.layers().reset();
+  var img = ee.Image(assets[year][attribute]);
+  // Calculate min/max of attribute and round to the nearest 10
+  var stats = img.reduceRegion({reducer: ee.Reducer.percentile([1, 99]), geometry: img.geometry(), scale: 30, maxPixels: 1e13});
+  var minVal = ee.Number(stats.get('b1_p1')).round().divide(10).floor().multiply(10);
+  var maxVal = ee.Number(stats.get('b1_p99')).round().divide(10).ceil().multiply(10);
+  // Style points by selected attribute
+  var visParams = {palette: ['FF0000', 'FFFF00', '00FFFF', '0000FF']};
+  minVal.evaluate(function(mini) {
+    maxVal.evaluate(function(maxi) {
+      Map.addLayer(img, {min: mini, max: maxi, palette: visParams.palette}, attribute);
+    });
+  });
+  // remove and redraw legend each time a new selection is made
+  if (legendPanel) Map.remove(legendPanel);
+  legendPanel = makeLegend(attribute, visParams);
+  Map.add(legendPanel);
+  currentImage = img;
+  attri = attribute;
+}
+
+// if year is changed, regenerate the checkboxes (and updatemap)
+yearSelect.onChange(function(year) {
+  makeAttributeCheckboxes(year);
+});
+// load default year (2024)
+makeAttributeCheckboxes(years[years.length - 1]);
+
+// Extract attribute value of particular year and generate time series of all years whena pixel is clicked
+Map.onClick(function(coords) {
+  if (!currentImage) return;
+  // extract coordinates and pixel value when clicked
+  var point = ee.Geometry.Point(coords.lon, coords.lat);
+  var value = currentImage.sample(point, 30).first().get('b1');
+  
+  // display pixel value at the top
+  value.evaluate(function(v) {
+    if (pixelInfo) Map.remove(pixelInfo);
+    var msg = attri + ' value at (' + coords.lon.toFixed(4) + ', ' + coords.lat.toFixed(4) + ') for ' + yr + ' = ' + (v).toFixed(3);
+    pixelInfo.setValue(msg);
+    Map.add(pixelInfo);
+  });
+  
+  // create feature list of all years (for time series) for selected variable
+  var featureList = [];
+  years.forEach(function(y) {
+    var img = ee.Image(assets[y][attri]);
+    var val = img.reduceRegion({reducer: ee.Reducer.first(),  geometry: point,  scale: 30, bestEffort: true}).get('b1');
+    featureList.push(ee.Feature(null, {year: Number(y), value: val}));
+  });
+  // generate time series for clicked pixel and display
+  var fc = ee.FeatureCollection(featureList);
+  var stdDev = fc.reduceColumns({reducer: ee.Reducer.stdDev(), selectors: ['value']}).get('stdDev');
+  stdDev.evaluate(function(sd) {
+    var sdText = (sd !== null) ? sd.toFixed(3) : 'NA';
+    var chart = ui.Chart.feature.byFeature(fc, 'year', 'value')
+      .setOptions({hAxis: {title: 'Year', format: '####', ticks: yearTicks, slantedText: true, slantedTextAngle: 90}, vAxis: {title: attri},
+      title: 'Pixel time series (Std Dev = ' + sdText + ')', lineWidth: 2, pointSize: 4, format: '####'});
+    chartPanel.clear();
+    chartPanel.add(chart);
+  });
+});
+
+// display map to appropriate zoom level (8) of entire region
 Map.centerObject(currentImage, 8);

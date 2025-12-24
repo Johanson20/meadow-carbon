@@ -5,11 +5,17 @@ Created on Mon Nov 24 13:17:24 2025
 @author: jonyegbula
 """
 
+import glob, ee
+ee.Initialize()
+
+# delete assets for a particular year
 all_assets = ee.data.listAssets({"parent": "projects/ee-jonyegbula/assets"})["assets"]
 assets_2007 = [a['name'] for a in all_assets if '2024' in a['name']]
 for asset in assets_2007: ee.data.deleteAsset(asset)
 
-for year in [1984, 1985, 2007, 2012, 2015, 2022, 2024]:
+# set visibility of all assets
+acl_update = {'all_users_can_read': True}
+for year in range(1984, 2025):
     tifs = glob.glob(f"files/{year}*.tif")
     for tif in tifs:
         asset_id = asset + tif[6:-4]

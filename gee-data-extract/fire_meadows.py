@@ -107,13 +107,14 @@ for meadowIdx in range(meadows.shape[0]):
     elif feature.geometry.geom_type == 'MultiPolygon':
         shapefile_bbox = ee.Geometry.MultiPolygon(list(list(poly.exterior.coords) for poly in feature.geometry.geoms))
     # convert landsat image collection over each meadow to list for iteration
-    target_date = feature.DtFire.strftime("%Y-%m-%d")
+    try:
+        target_date = feature.DtFire.strftime("%Y-%m-%d")
+    except:     # skip null dates
+        continue
+    
     # extract data up to 30 days before fire date (can change date)
     meadow_values = getBandValues(shapefile_bbox, target_date, 30)
-    
-    if not meadow_values:     # drop rows that returned null band values
-        print("Row index", meadowIdx, "dropped!")
-        meadow_data.drop(meadowIdx, inplace=True)
+    if not meadow_values:     # skip rows that returned null band values
         continue
     
     # extract the meadow values and append to dataframe
@@ -126,6 +127,7 @@ for meadowIdx in range(meadows.shape[0]):
 # check how many meadows had data successfully extracted
 len([x for x in meadow_data['BSI_mean']])
 # reset index for dropped meadow
+meadow_data.dropna(inplace=True)
 meadow_data.reset_index(drop=True, inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
