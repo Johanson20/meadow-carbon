@@ -165,8 +165,11 @@ var assets = {
               "BNPP StdErr": BNPP_SD_2024, "Elevation (m)": Elev_2024, "NEP (Net Ecoystem Productivity)": NEP_2024, "NEP StdErr": NEP_SD_2024, "Rh (Respiration)": Rh_2024, "Rh StdErr": Rh_SD_2024},
 };
 
-// extract years and create the selection panel
+// clear any drawings
+Map.drawingTools().layers().reset();
+// extract years/attributes and create the selection panel
 var years = Object.keys(assets);
+var attributes = Object.keys(assets[years[0]]);
 var yearSelect = ui.Select({items: years, value: years[0], style: {margin: '0 0 6px 0', width: '100px', height: '40px'} });
 // set year to last year (2024)
 yearSelect.setValue(years[years.length - 1], true);
@@ -194,12 +197,21 @@ Map.add(chartPanel);
 // generate 98th percentiles of each variable per year and use max of all years per variable
 var p98Lookup = {};
 Object.keys(assets[years[0]]).forEach(function(attr) {
-  var yearlyP98s = years.map(function(y) {
-    var img = ee.Image(assets[y][attr]);
-    return img.reduceRegion({
-      reducer: ee.Reducer.percentile([98]), geometry: img.geometry(), scale: 30, maxPixels: 1e13}).get('b1');});
-  p98Lookup[attr] = ee.Number(ee.List(yearlyP98s).reduce(ee.Reducer.max()));
+  var attrIC = ee.ImageCollection.fromImages(
+    years.map(function(y) {return ee.Image(assets[y][attr]).set('year', Number(y));
+    }));
+  var maxP98 = attrIC.map(function(img) {return img.set('p98',
+  img.reduceRegion({reducer: ee.Reducer.percentile([98]), geometry: img.geometry(), scale: 30, maxPixels: 1e13}).get('b1'));
+  }).aggregate_max('p98');
+  p98Lookup[attr] = maxP98;
 });
+/* quick loading of percentile values (pre-computed in python from detailed annual CSVs)
+var percentiles_98 =[2001.0, 727.1, 237.0, 2983.725146484375, 412.0129242790604, 1598.1482852643521, 1202.7558636892268,
+                      1315.7023544660567, 712.6666091599797, 829.6798922771411, 1386.4061729674954, 1301.5462543077829]
+attributes.forEach(function(attr, i) {
+  p98Lookup[attr] = percentiles_98[i];
+});
+*/
 
 // include variables and panels for displaying drawing capabilities and image download
 var drawingTools = Map.drawingTools();
@@ -225,13 +237,21 @@ function handleDownload() {
   // area limit (example: 100 km²)
   geom.area().divide(1e6).evaluate(function(areaKm2) {
     if (areaKm2 > 100) {
-      msgPanel.add(ui.Label('Selected area of ' + areaKm2.toFixed(3) + 'km2 is too large (limit: 100 km²)!', {color: 'red', fontWeight: 'bold'}));
+      msgPanel.add(ui.Label('Selected area of ' + areaKm2.toFixed(3) + 'km2 is too large (limit: 100 km²)!',
+                            {color: 'red', fontWeight: 'bold'}));
       return;
     }
-    var url = currentImage.clip(geom).getDownloadURL({scale: 30, region: geom, crs: 'EPSG:4326'});
-    // user-controlled download (generates a download link for boundary drawn)
-    var link = ui.Label({value: 'Click here to download GeoTIFF', targetUrl: url, style: {color: 'blue'}});
+    // build multiband single image: one band per year
+    var currentImage = ee.Image(years.map(function(y) {
+        return ee.Image(assets[y][attri])})
+        ).clip(geom);
+    // user-controlled download (generates a download link for boundary drawn): provide single and multi band options
+    var url = currentImage.getDownloadURL({scale: 30, region: geom, crs: 'EPSG:4326', filePerBand: false});
+    var spliturl = currentImage.getDownloadURL({scale: 30, region: geom, crs: 'EPSG:4326'});
+    var link = ui.Label({value: 'Download multi-band GeoTIFF (' + attri + ')', targetUrl: url});
+    var split_link = ui.Label({value: 'Download single-band GeoTIFFs (' + attri + ')', targetUrl: spliturl});
     msgPanel.add(link);
+    msgPanel.add(split_link);
   });
 }
 
@@ -241,7 +261,6 @@ function makeAttributeCheckboxes(year) {
   checkboxes = [];
   yr = year;
 
-  var attributes = Object.keys(assets[year]);
   attributes.forEach(function(attr) {   // loop through attributes
     var checkbox = ui.Checkbox({
       label: attr,
@@ -312,9 +331,9 @@ function updateMap(year, attribute) {
   Map.layers().reset();
   var img = ee.Image(assets[year][attribute]);
   // Calculate min/max of attribute and round to the nearest 10
-  var stats = img.reduceRegion({reducer: ee.Reducer.percentile([1, 99]), geometry: img.geometry(), scale: 30, maxPixels: 1e13});
-  var minVal = ee.Number(stats.get('b1_p1')).round().divide(10).floor().multiply(10);
-  var maxVal = ee.Number(stats.get('b1_p99')).round().divide(10).ceil().multiply(10);
+  var stats = img.reduceRegion({reducer: ee.Reducer.percentile([2, 98]), geometry: img.geometry(), scale: 30, maxPixels: 1e13});
+  var minVal = ee.Number(stats.get('b1_p2')).round().divide(10).floor().multiply(10);
+  var maxVal = ee.Number(stats.get('b1_p98')).round().divide(10).ceil().multiply(10);
   // Style points by selected attribute
   var visParams = {palette: ['FF0000', 'FFFF00', '00FFFF', '0000FF']};
   minVal.evaluate(function(mini) {

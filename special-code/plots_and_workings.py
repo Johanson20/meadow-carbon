@@ -22,6 +22,16 @@ for year in range(1984, 2025):
         ee.data.setAssetAcl(asset_id, acl_update)
     print(year, end=' ')
 
+# get max 98th percentile value for each attribute for GEE app
+store = [0,0,0,0,0,0, 0,0,0,0,0,0]
+for year in range(1986, 2025):
+    data = pd.read_csv(f"files/{year}_Meadows.csv")
+    for i in range(12):
+        col = data.columns[i+2]
+        store[i] = max(store[i], data[col].quantile(0.98))
+    print(year, end=' ')
+store
+
 data[['ModisNPP', 'LandsatNPP']] *= 0.1
 
 data.loc[data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0

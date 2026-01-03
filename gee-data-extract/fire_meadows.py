@@ -75,7 +75,7 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
             properties = nearest_image.getInfo()['properties']
             band_values = nearest_image.reduceRegion(reducerFunc, shapefile_bbox, 30).getInfo()
         
-        return [list(band_values.values()), nppVal, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
+        return [list(band_values.values()), nppVal['annualNPP'], properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
     except:     # if there was error in retrieving values due to no data available within dates
         return []
 
@@ -125,7 +125,7 @@ for meadowIdx in range(meadows.shape[0]):
     if meadowIdx%20 == 0: print(meadowIdx, end=', ')
 
 # check how many meadows had data successfully extracted
-len([x for x in meadow_data['BSI_mean']])
+len([x for x in meadow_data['BSI_mean'] if x])
 # reset index for dropped meadow
 meadow_data.dropna(inplace=True)
 meadow_data.reset_index(drop=True, inplace=True)
