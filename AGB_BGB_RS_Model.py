@@ -437,7 +437,7 @@ y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
-# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+# check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
@@ -631,7 +631,7 @@ y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
-# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+# check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 

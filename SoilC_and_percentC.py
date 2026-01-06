@@ -266,9 +266,9 @@ data.to_csv(filename.split(".csv")[0] + "_Carbon_Data.csv", index=False)
 
 
 # ML training starts here
-from sklearn.model_selection import GroupShuffleSplit
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.utils import resample
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 from sklearn.inspection import PartialDependenceDisplay
 from matplotlib.backends.backend_pdf import PdfPages
@@ -276,7 +276,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 # read csv containing random samples and model soil carbon
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Carbon_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")
 data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -285,11 +285,11 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:21]) + list(cols[22:])
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
-# check for missing/null values across columns and rows respectively (confirm results below should be all 0)
+# check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
 
@@ -301,24 +301,45 @@ data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
 with PdfPages('files/SoilC_Scatter_plots.pdf') as pdf:
-    for feature in var_col:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
-        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+    col2 = cols[10:]
+    for i in range(0, len(col2), 9):
+        # Get up to 9 features for this page
+        page_features = col2[i:i+9]
+        # Create 3x3 subplots
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()  # Flatten to 1D array for easy indexing
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+            ax.set_title(f'{feature} vs {y_field}', fontsize=10)
+        # Hide unused subplots if fewer than 9 features on last page
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
+# bin the dataset based on soil carbon values
+data[y_field].describe()
+data['SoilC'] = 0
+for value in range(2, 16, 2):   # max rounded value is 16
+    mask = (data[y_field] > value) & (data[y_field] <= (value+2))
+    data.loc[mask, 'SoilC'] = value//2
+data['SoilC'].describe()
+
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
-gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
-split = gsp.split(data, groups=data['ID'])
-train_index, test_index = next(split)
-train_data = data.iloc[train_index]
-test_data = data.iloc[test_index]
+train_df = data.groupby('SoilC', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=10))
+test_data = data[~data.index.isin(train_df.index)]
+# upsample the training dataset so that all bins have same amount of rows
+max_size = train_df['SoilC'].value_counts().max()
+train_data = (train_df.groupby('SoilC', group_keys=False)
+    .apply(lambda x: resample(x, replace=True, n_samples=max_size, random_state=10)).reset_index(drop=True))
+train_data['SoilC'].value_counts()
 
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=11, n_estimators=50, subsample=0.3,
+bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=12, n_estimators=25, subsample=0.7,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -389,7 +410,7 @@ plotY()
 
 
 # read csv containing random samples and model percent carbon
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Carbon_Data.csv")
+data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")
 data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -398,7 +419,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  list(cols[9:21]) + list(cols[22:])
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -414,24 +435,44 @@ data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
 with PdfPages('files/PercentC_Scatter_plots.pdf') as pdf:
-    for feature in var_col:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
-        ax.set_title(f'Scatter plot of {feature} vs {y_field}')
+    for i in range(0, len(var_col), 9):
+        # Get up to 9 features for this page
+        page_features = var_col[i:i+9]
+        # Create 3x3 subplots
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()  # Flatten to 1D array for easy indexing
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            sns.regplot(x=feature, y=y_field, data=data, line_kws={"color":"red"}, ax=ax)
+            ax.set_title(f'{feature} vs {y_field}', fontsize=10)
+        # Hide unused subplots if fewer than 9 features on last page
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
 # split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
-gsp = GroupShuffleSplit(n_splits=2, test_size=0.2, random_state=10)
-split = gsp.split(data, groups=data['ID'])
-train_index, test_index = next(split)
-train_data = data.iloc[train_index]
-test_data = data.iloc[test_index]
+data[y_field].describe()
+data['percentCarbon'] = 0
+for value in range(2, 16, 2):   # max rounded value is 16
+    mask = (data[y_field] > value) & (data[y_field] <= (value+2))
+    data.loc[mask, 'percentCarbon'] = value//2
+data['percentCarbon'].describe()
+
+# split data into training (80%) and test data (20%) by IDs, random state ensures reproducibility
+train_df = data.groupby('percentCarbon', group_keys=False).apply(lambda x: x.sample(frac=0.8, random_state=10))
+test_data = data[~data.index.isin(train_df.index)]
+# upsample the training dataset so that all bins have same amount of rows
+max_size = train_df['percentCarbon'].value_counts().max()
+train_data = (train_df.groupby('percentCarbon', group_keys=False)
+    .apply(lambda x: resample(x, replace=True, n_samples=max_size, random_state=10)).reset_index(drop=True))
+train_data['percentCarbon'].value_counts()
 
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=10, n_estimators=75, subsample=0.4,
+bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=3, n_estimators=25, subsample=0.3,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_percentc_model.fit(X_train, y_train)
 # Make partial dependence plots

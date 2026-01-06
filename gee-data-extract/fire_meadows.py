@@ -126,10 +126,6 @@ for meadowIdx in range(meadows.shape[0]):
 
 # check how many meadows had data successfully extracted
 len([x for x in meadow_data['BSI_mean'] if x])
-# reset index for dropped meadow
-meadow_data.dropna(inplace=True)
-meadow_data.reset_index(drop=True, inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
 meadow_data.to_csv("files/fire_meadows_data.csv", index=False)
-    
