@@ -240,6 +240,17 @@ y_field = 'CO2.umol.m2.s'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
+# create correlation matrix
+corr_mat = pd.DataFrame(index=np.arange(len(var_col)), columns=var_col)
+for i in range(len(var_col)):
+    vals = []
+    col1 = var_col[i]
+    for col2 in var_col:
+        vals.append(np.corrcoef(data[col1], data[col2])[0][1])
+    corr_mat.iloc[i, :] = vals
+corr_mat.index = corr_mat.columns
+corr_mat.to_csv("files/GHG_correlation.csv")
+
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())

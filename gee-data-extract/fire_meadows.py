@@ -19,8 +19,8 @@ warnings.filterwarnings("ignore")
 ee.Initialize()
 
 
+# rename bands and mask out cloud based on bits in QA_pixel; then scale values
 def maskAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel; then scale values
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -35,23 +35,22 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
+# calculate and add indices from landsat band values, and return only indices
 def calculateIndices(image):
-    # calculate and add indices from landsat band values, and return only indices
     ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     image = image.addBands([ndwi, evi, bsi])
     return image.select(["NDWI", "EVI", "BSI"])
 
+
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
 def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
     year, month, day = target_date.split("-")
-    
     # Calculates absolute time difference (in days) from a target date, in which the images are acquired
     def calculate_time_difference(image):
         time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
         return image.set('time_difference', time_difference)
-    
     try:
         # filter landsat images by location
         spatial_filtered = landsat.filterBounds(shapefile_bbox)
@@ -75,7 +74,9 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
             properties = nearest_image.getInfo()['properties']
             band_values = nearest_image.reduceRegion(reducerFunc, shapefile_bbox, 30).getInfo()
         
-        return [list(band_values.values()), nppVal['annualNPP'], properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
+        # fraction of water covered pixels (NDWI > 0.5)
+        water_coverage = nearest_image.select("NDWI").gt(0.5).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()["NDWI"]
+        return [list(band_values.values()), water_coverage, nppVal, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
     except:     # if there was error in retrieving values due to no data available within dates
         return []
 
@@ -96,7 +97,7 @@ landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 
 # create empty dataframe, one for each meadow
 meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date',
-            'Image_Date', 'Image_Time', 'Days_Difference', 'LandsatNPP', 'BSI_mean', 'BSI_median', 'BSI_std',
+            'Image_Date', 'Image_Time', 'Days_Difference', 'LandsatNPP', 'Water_cover%', 'BSI_mean', 'BSI_median', 'BSI_std',
             'EVI_mean','EVI_median', 'EVI_std', 'NDWI_mean', 'NDWI_median', 'NDWI_std'])
 
 for meadowIdx in range(meadows.shape[0]):
@@ -118,9 +119,10 @@ for meadowIdx in range(meadows.shape[0]):
         continue
     
     # extract the meadow values and append to dataframe
-    band_values, nppVal, time_diff, image_date, image_time = meadow_values 
+    band_values, water_pixels, nppVal, time_diff, image_date, image_time = meadow_values
+    if nppVal: nppVal = nppVal['annualNPP']
     meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, image_date, image_time, 
-                                      time_diff, nppVal] + band_values
+                                      time_diff, nppVal, water_pixels] + band_values
     # print progress for every 20 meadows processed
     if meadowIdx%20 == 0: print(meadowIdx, end=', ')
 
@@ -128,4 +130,4 @@ for meadowIdx in range(meadows.shape[0]):
 len([x for x in meadow_data['BSI_mean'] if x])
 meadow_data.head()
 # write updated dataframe to new csv file
-meadow_data.to_csv("files/fire_meadows_data.csv", index=False)
+meadow_data.to_csv("csv/fire_meadows_data.csv", index=False)

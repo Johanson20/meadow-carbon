@@ -437,6 +437,17 @@ y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
+# create correlation matrix
+corr_mat = pd.DataFrame(index=np.arange(len(var_col)), columns=var_col)
+for i in range(len(var_col)):
+    vals = []
+    col1 = var_col[i]
+    for col2 in var_col:
+        vals.append(np.corrcoef(data[col1], data[col2])[0][1])
+    corr_mat.iloc[i, :] = vals
+corr_mat.index = corr_mat.columns
+corr_mat.to_csv("files/BGB_correlation.csv")
+
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
@@ -631,6 +642,17 @@ y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 
+# create correlation matrix
+corr_mat = pd.DataFrame(index=np.arange(len(var_col)), columns=var_col)
+for i in range(len(var_col)):
+    vals = []
+    col1 = var_col[i]
+    for col2 in var_col:
+        vals.append(np.corrcoef(data[col1], data[col2])[0][1])
+    corr_mat.iloc[i, :] = vals
+corr_mat.index = corr_mat.columns
+corr_mat.to_csv("files/AGB_correlation.csv")
+
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
@@ -753,6 +775,8 @@ def plotFeatureImportance():
 plotFeatureImportance()
 plotTestY()
 plotTrainY()
+np.array(agb_model.feature_names_in_)[sorted_idx]
+np.array(agb_model.feature_importances_)[sorted_idx]
 
 
 with open('files/soil_models.pckl', 'wb') as f:   # there is also models.pckl

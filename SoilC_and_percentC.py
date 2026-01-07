@@ -285,13 +285,24 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Organic_Matter', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
+
+# create correlation matrix
+corr_mat = pd.DataFrame(index=np.arange(len(var_col)), columns=var_col)
+for i in range(len(var_col)):
+    vals = []
+    col1 = var_col[i]
+    for col2 in var_col:
+        vals.append(np.corrcoef(data[col1], data[col2])[0][1])
+    corr_mat.iloc[i, :] = vals
+corr_mat.index = corr_mat.columns
+corr_mat.to_csv("files/Soil_carbon_correlation.csv")
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
@@ -339,15 +350,23 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=12, n_estimators=25, subsample=0.7,
+bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=9, n_estimators=25, subsample=0.7,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
-    for i in range(len(var_col)):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        PartialDependenceDisplay.from_estimator(bgb_soilc_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
-        ax.set_title(f'Partial Dependence of {var_col[i]}')
+    for i in range(0, len(var_col), 9):
+        page_features = var_col[i:i+9]
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            PartialDependenceDisplay.from_estimator(bgb_soilc_model, data[var_col], [feature], random_state=10, ax=ax)
+            ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
+        # Remove unused axes
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -419,13 +438,24 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
+var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Organic_Matter', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
 # check for missing/null values across columns and rows respectively (confirm results below should be all 0)
 sum(subdata.isnull().any(axis=0) == True)
 sum(subdata[y_field].isnull())
+
+# create correlation matrix
+corr_mat = pd.DataFrame(index=np.arange(len(var_col)), columns=var_col)
+for i in range(len(var_col)):
+    vals = []
+    col1 = var_col[i]
+    for col2 in var_col:
+        vals.append(np.corrcoef(data[col1], data[col2])[0][1])
+    corr_mat.iloc[i, :] = vals
+corr_mat.index = corr_mat.columns
+corr_mat.to_csv("files/Percent_carbon_correlation.csv")
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
@@ -472,15 +502,23 @@ train_data['percentCarbon'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.01, max_depth=3, n_estimators=25, subsample=0.3,
+bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.3, max_depth=4, n_estimators=25, subsample=0.7,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
-    for i in range(len(var_col)):
-        fig, ax = plt.subplots(figsize=(8, 6))
-        PartialDependenceDisplay.from_estimator(bgb_percentc_model, data.loc[:, var_col], [i], random_state=10, ax=ax)
-        ax.set_title(f'Partial Dependence of {var_col[i]}')
+    for i in range(0, len(var_col), 9):
+        page_features = var_col[i:i+9]
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
+        axes = axes.flatten()
+        for j, feature in enumerate(page_features):
+            ax = axes[j]
+            PartialDependenceDisplay.from_estimator(bgb_percentc_model, data[var_col], [feature], random_state=10, ax=ax)
+            ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
+        # Remove unused axes
+        for j in range(len(page_features), 9):
+            fig.delaxes(axes[j])
+        fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
 
@@ -503,11 +541,11 @@ test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
-print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
-print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
-print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient matrix (R) = {:.4f}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient (R) = {:.4f}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = bgb_percentc_model.feature_importances_
