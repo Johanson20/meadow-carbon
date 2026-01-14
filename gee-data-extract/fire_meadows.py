@@ -54,10 +54,6 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
     try:
         # filter landsat images by location
         spatial_filtered = landsat.filterBounds(shapefile_bbox)
-        try:
-            nppVal = landsat_npp.filterDate(year+"-01-01", year+"-12-31").first().reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-        except:
-            nppVal = None
         # filter the images by dates on or bufferDays before fire date
         temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), target_date)
         # Sort the images by closest date to fire date and create an image list to loop through if there are valid images
@@ -67,16 +63,19 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
         nImage, band_values = 0, {'NDWI_mean': None}
         reducerFunc = (ee.Reducer.mean().combine(ee.Reducer.median(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True))
         
-        # repeatedly check for cloud free pixels (non-null value) in landsat 8, or checks in landsat 7
+        # repeatedly check for cloud free pixels (non-null value) in landsat 9, or checks in landsat 8 and then 7
         while band_values['NDWI_mean'] == None and nImage < noImages:
             nearest_image = calculateIndices(ee.Image(image_list.get(nImage)))
             nImage += 1
             properties = nearest_image.getInfo()['properties']
             band_values = nearest_image.reduceRegion(reducerFunc, shapefile_bbox, 30).getInfo()
         
-        # fraction of water covered pixels (NDWI > 0.5)
-        water_coverage = nearest_image.select("NDWI").gt(0.5).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()["NDWI"]
-        return [list(band_values.values()), water_coverage, nppVal, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
+        # number and fraction of pixels for NDWI > 0 and NDWI > 0.3
+        water_coverage = nearest_image.select('NDWI').addBands(nearest_image.select('NDWI').gt(0.3).rename(
+            'NDWI_03')).addBands(nearest_image.select('NDWI').gt(0.0).rename('NDWI_00')).reduceRegion(
+            reducer=ee.Reducer.mean().combine(reducer2=ee.Reducer.count(), sharedInputs=True),
+                                      geometry=shapefile_bbox, scale=30, maxPixels=1e13).getInfo()
+        return [list(band_values.values()), water_coverage, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
     except:     # if there was error in retrieving values due to no data available within dates
         return []
 
@@ -86,6 +85,9 @@ meadows = gpd.read_file("files/meadows_dateBeforeFire_fires2012to2023_20251210.s
 minx, miny, maxx, maxy = meadows.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
 meadow_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
+# sort the meadows by fire date to read pixel NPP data one year at a time
+meadows.sort_values(by="DtFire", inplace=True)
+meadows.reset_index(drop=True, inplace=True)
 
 # load all landsat images (order by most recent landsat) and npp values
 landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
@@ -96,9 +98,19 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 
 # create empty dataframe, one for each meadow
-meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date',
-            'Image_Date', 'Image_Time', 'Days_Difference', 'LandsatNPP', 'Water_cover%', 'BSI_mean', 'BSI_median', 'BSI_std',
-            'EVI_mean','EVI_median', 'EVI_std', 'NDWI_mean', 'NDWI_median', 'NDWI_std'])
+meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Image_Date',
+            'Image_Time', 'Days_Difference', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
+            'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDWI_mean',
+            'NDWI_median', 'NDWI_std', 'ANPP_mean', 'ANPP_std'])
+
+# define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
+my_year = '2012'
+meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=meadows.crs)
+data = pd.read_csv(f"files/{my_year}_Meadows.csv")
+# spatial join between each pixel of csv and meadow's geometry
+pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
+joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
+stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
 
 for meadowIdx in range(meadows.shape[0]):
     # extract a single meadow and it's geometry bounds;
@@ -110,19 +122,35 @@ for meadowIdx in range(meadows.shape[0]):
     # convert landsat image collection over each meadow to list for iteration
     try:
         target_date = feature.DtFire.strftime("%Y-%m-%d")
+        year, month, day = target_date.split("-")
     except:     # skip null dates
         continue
     
+    # read a new pixel level csv file when the next year is encountered (saves computational cost)
+    if year != my_year:
+        my_year = year
+        data = pd.read_csv(f"files/{my_year}_Meadows.csv")
+        pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
+        joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
+        stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
+        
     # extract data up to 30 days before fire date (can change date)
     meadow_values = getBandValues(shapefile_bbox, target_date, 30)
     if not meadow_values:     # skip rows that returned null band values
         continue
     
+    try:    # check if valid NPPs are available for meadow
+        NPP = stats.loc[meadowIdx, :]
+        NPP_vals = [NPP['mean'],  NPP['std']]
+    except:
+        NPP_vals = [None, None]
+    
     # extract the meadow values and append to dataframe
-    band_values, water_pixels, nppVal, time_diff, image_date, image_time = meadow_values
-    if nppVal: nppVal = nppVal['annualNPP']
+    band_values, NDWI_pixels, time_diff, image_date, image_time = meadow_values
+    NDWI_pixels = list(NDWI_pixels.values())[:4]
+    NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
     meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, image_date, image_time, 
-                                      time_diff, nppVal, water_pixels] + band_values
+                                      time_diff] + NDWI_pixels + band_values + NPP_vals
     # print progress for every 20 meadows processed
     if meadowIdx%20 == 0: print(meadowIdx, end=', ')
 
