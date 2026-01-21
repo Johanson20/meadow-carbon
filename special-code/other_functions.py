@@ -14,6 +14,7 @@ import rioxarray as xr
 import rasterio
 import contextlib
 import warnings
+import pickle
 import ee
 import geemap
 from shapely.geometry import Polygon
@@ -250,6 +251,54 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleFile("files/2019NEP", "files/NEP_2019_Zone10.tif", "NEP.tif", False)
 # mergeToSingleFile("files/2016NEP", "files/NEP_2016_Zone11.tif", "1SD_NEP.tif", True, 32611)
+
+
+def predictSoilandPercentCarbon(years):
+    # extract models for soil and percentage carbon
+    with open('csv/bgb_carbon_models.pckl', 'rb') as f:
+        bgb_percentc_model, bgb_soilc_model = pickle.load(f)
+    percentc_col, soilc_col = list(bgb_percentc_model.feature_names_in_), list(bgb_soilc_model.feature_names_in_)
+    mycols = ['ID','X','Y','Rh','ANPP','BNPP','NEP','1SD_Rh','1SD_ANPP','1SD_BNPP','1SD_NEP','PercentC','SoilC']
+    
+    for year in years:
+        # loop through each csv file and predict soil and percentage carbon based on model (per year)
+        outfile = f"files/{year}_soil_percent_carbon.csv"
+        all_files = [f for f in glob.glob(f"files/{year}/*.csv")]
+        all_data = pd.DataFrame(columns=mycols)
+        for file in all_files:
+            df = pd.read_csv(file)
+            df['ID'] = int(file.split("_")[2][:-4])
+            zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
+            df['PercentC'] = bgb_percentc_model.predict(df.loc[:, percentc_col])
+            df['SoilC'] = bgb_soilc_model.predict(df.loc[:, soilc_col])
+            # convert negative predictions to 0 and save predictions to another file
+            df.loc[df['PercentC'] < 0, 'PercentC'] = 0
+            df.loc[df['SoilC'] < 0, 'SoilC'] = 0
+            gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+            df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
+            df = df[mycols]
+            all_data = pd.concat([all_data, df])
+        all_data = all_data.dropna().reset_index(drop=True)
+        all_data = all_data[mycols]
+        all_data.to_csv(outfile, index=False)
+        print(year, end='. ')
+        
+        # generate geotiffs for predictions at 30m resolution (same as splitCSVToGeotiffs function)
+        utm_lons, utm_lats = all_data['X'], all_data['Y']
+        gdf = gpd.GeoDataFrame(geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=4326).to_crs(3310)
+        mycrs = "EPSG:4326"
+        for attribute in ['PercentC','SoilC']:
+            gdf[attribute] = all_data[attribute]
+            out_grd = make_geocube(vector_data=gdf, measurements=[attribute], resolution=(-30, 30))
+            out_grd = out_grd.rio.reproject(mycrs)
+            out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
+            out_grd.rio.to_raster((outfile[:11] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
+            gdf.drop(attribute, axis=1, inplace=True)
+            all_data.drop(attribute, axis=1, inplace=True)
+            print(attribute, "done!")
+
+# predictSoilandPercentCarbon(list(range(1985, 2025, 5)) + [2024])
+# predictSoilandPercentCarbon([2020])
 
 
 def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):

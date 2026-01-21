@@ -37,11 +37,12 @@ def maskAndRename(image):
 
 # calculate and add indices from landsat band values, and return only indices
 def calculateIndices(image):
-    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
+    ndmi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
+    ndwi = image.normalizedDifference(['Green', 'NIR']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
-    image = image.addBands([ndwi, evi, bsi])
-    return image.select(["NDWI", "EVI", "BSI"])
+    image = image.addBands([ndmi, evi, bsi, ndwi])
+    return image.select(["NDMI", "EVI", "BSI", "NDWI"])
 
 
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
@@ -60,11 +61,11 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
         sorted_collection = temporal_filtered.map(calculate_time_difference).sort('time_difference')
         image_list = sorted_collection.toList(sorted_collection.size())
         noImages = image_list.size().getInfo()
-        nImage, band_values = 0, {'NDWI_mean': None}
+        nImage, band_values = 0, {'NDMI_mean': None}
         reducerFunc = (ee.Reducer.mean().combine(ee.Reducer.median(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True))
         
         # repeatedly check for cloud free pixels (non-null value) in landsat 9, or checks in landsat 8 and then 7
-        while band_values['NDWI_mean'] == None and nImage < noImages:
+        while band_values['NDMI_mean'] == None and nImage < noImages:
             nearest_image = calculateIndices(ee.Image(image_list.get(nImage)))
             nImage += 1
             properties = nearest_image.getInfo()['properties']
@@ -75,7 +76,7 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
             'NDWI_03')).addBands(nearest_image.select('NDWI').gt(0.0).rename('NDWI_00')).reduceRegion(
             reducer=ee.Reducer.mean().combine(reducer2=ee.Reducer.count(), sharedInputs=True),
                                       geometry=shapefile_bbox, scale=30, maxPixels=1e13).getInfo()
-        return [list(band_values.values()), water_coverage, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
+        return [list(band_values.values())[:-3], water_coverage, properties['time_difference'], properties['DATE_ACQUIRED'], properties['SCENE_CENTER_TIME']]
     except:     # if there was error in retrieving values due to no data available within dates
         return []
 
@@ -100,11 +101,11 @@ landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 # create empty dataframe, one for each meadow
 meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Image_Date',
             'Image_Time', 'Days_Difference', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
-            'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDWI_mean',
-            'NDWI_median', 'NDWI_std', 'ANPP_mean', 'ANPP_std'])
+            'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDMI_mean',
+            'NDMI_median', 'NDMI_std', 'ANPP_mean', 'ANPP_std'])
 
 # define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
-my_year = '2012'
+my_year = str(meadows.DtFire[0].year)
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=meadows.crs)
 data = pd.read_csv(f"files/{my_year}_Meadows.csv")
 # spatial join between each pixel of csv and meadow's geometry
@@ -148,7 +149,7 @@ for meadowIdx in range(meadows.shape[0]):
     # extract the meadow values and append to dataframe
     band_values, NDWI_pixels, time_diff, image_date, image_time = meadow_values
     NDWI_pixels = list(NDWI_pixels.values())[:4]
-    NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
+    if NDWI_pixels[1]: NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
     meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, image_date, image_time, 
                                       time_diff] + NDWI_pixels + band_values + NPP_vals
     # print progress for every 20 meadows processed
@@ -156,6 +157,7 @@ for meadowIdx in range(meadows.shape[0]):
 
 # check how many meadows had data successfully extracted
 len([x for x in meadow_data['BSI_mean'] if x])
+meadow_data.sort_values(by="UniqueID", inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
 meadow_data.to_csv("csv/fire_meadows_data.csv", index=False)
