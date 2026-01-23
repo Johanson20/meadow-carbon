@@ -107,7 +107,7 @@ meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID
 # define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
 my_year = str(meadows.DtFire[0].year)
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=meadows.crs)
-data = pd.read_csv(f"files/{my_year}_Meadows.csv")
+data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
 # spatial join between each pixel of csv and meadow's geometry
 pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
@@ -130,7 +130,7 @@ for meadowIdx in range(meadows.shape[0]):
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
     if year != my_year:
         my_year = year
-        data = pd.read_csv(f"files/{my_year}_Meadows.csv")
+        data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
         pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])

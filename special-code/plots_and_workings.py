@@ -25,7 +25,7 @@ for year in range(1984, 2025):
 # get max 98th percentile value for each attribute for GEE app
 store = [0,0,0,0,0,0, 0,0,0,0,0,0]
 for year in range(1986, 2025):
-    data = pd.read_csv(f"files/{year}_Meadows.csv")
+    data = pd.read_csv(f"files/results/{year}_Meadows.csv")
     for i in range(12):
         col = data.columns[i+2]
         store[i] = max(store[i], data[col].quantile(0.98))
@@ -44,12 +44,12 @@ data['BNPP'] = data['Root_Turnover'] + data['Root_Exudates']
 
 data.head()
 
-data = pd.read_csv("files/2024_Meadows.csv")
+data = pd.read_csv("files/results/2024_Meadows.csv")
 jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
 
 
 for year in range(1984, 2025):
-    outfile = f'files/{year}_Meadows.csv'
+    outfile = f'files/results/{year}_Meadows.csv'
     statsfile = f'files/{year}_Meadows_stats.csv'
     stats = pd.read_csv(statsfile)
     stats['ID'], stats['PixelCount'] = [int(x) for x in stats['ID']], [int(x) for x in stats['PixelCount']]
@@ -88,7 +88,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year, month, day = target_date.split("-")
-    df = pd.read_csv(f"files/{year}_Meadows.csv")
+    df = pd.read_csv(f"files/results/{year}_Meadows.csv")
     # next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
     
@@ -101,7 +101,7 @@ for idx in range(data.shape[0]):
         continue
 
 for year in range(1984, 2025):
-    # df = pd.read_csv(f"files/{year}_Meadows.csv")
+    # df = pd.read_csv(f"files/results/{year}_Meadows.csv")
     data = pd.read_csv(f"files/{year}_Meadows_stats.csv")
     # data['ID'] = data['ID'].astype(int)
     # data = data.sort_values(by='ID', ascending=True)
@@ -142,7 +142,7 @@ def get_closest_nep(csv_path, meadow_id, lon, lat, chunksize=200000):
 
 results = []
 for _, r in all_data.iterrows():
-    nep = get_closest_nep(f"files/{year}_Meadows.csv", r.ID, r.Longitude, r.Latitude)
+    nep = get_closest_nep(f"files/results/{year}_Meadows.csv", r.ID, r.Longitude, r.Latitude)
     results.append(nep)
     if _%20 == 0: print(_, end=' ')
 
