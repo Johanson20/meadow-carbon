@@ -258,11 +258,11 @@ def predictSoilandPercentCarbon(years):
     with open('csv/bgb_carbon_models.pckl', 'rb') as f:
         bgb_percentc_model, bgb_soilc_model = pickle.load(f)
     percentc_col, soilc_col = list(bgb_percentc_model.feature_names_in_), list(bgb_soilc_model.feature_names_in_)
-    mycols = ['ID','X','Y','Rh','ANPP','BNPP','NEP','1SD_Rh','1SD_ANPP','1SD_BNPP','1SD_NEP','PercentC','SoilC']
+    mycols = ['ID','X','Y','PercentC','SoilC']
     
     for year in years:
         # loop through each csv file and predict soil and percentage carbon based on model (per year)
-        outfile = f"files/{year}_soil_percent_carbon.csv"
+        outfile = f"files/results/{year}_Meadows.csv"
         all_files = [f for f in glob.glob(f"files/{year}/*.csv")]
         all_data = pd.DataFrame(columns=mycols)
         for file in all_files:
@@ -280,7 +280,11 @@ def predictSoilandPercentCarbon(years):
             all_data = pd.concat([all_data, df])
         all_data = all_data.dropna().reset_index(drop=True)
         all_data = all_data[mycols]
-        all_data.to_csv(outfile, index=False)
+        gdf = pd.read_csv(outfile)
+        gdf['ID']  = all_data['ID']
+        gdf['PercentC']  = all_data['PercentC']
+        gdf['SoilC']  = all_data['SoilC']
+        gdf.to_csv(outfile, index=False)
         print(year, end='. ')
         
         # generate geotiffs for predictions at 30m resolution (same as splitCSVToGeotiffs function)
@@ -292,12 +296,12 @@ def predictSoilandPercentCarbon(years):
             out_grd = make_geocube(vector_data=gdf, measurements=[attribute], resolution=(-30, 30))
             out_grd = out_grd.rio.reproject(mycrs)
             out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
-            out_grd.rio.to_raster((outfile[:11] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
+            out_grd.rio.to_raster((outfile[:19] + attribute + ".tif"), tiled=True, compress="LZW", dtype="float32")
             gdf.drop(attribute, axis=1, inplace=True)
             all_data.drop(attribute, axis=1, inplace=True)
             print(attribute, "done!")
 
-# predictSoilandPercentCarbon(list(range(1985, 2025, 5)) + [2024])
+# predictSoilandPercentCarbon(list(range(1985, 2025, 5)) + [1986, 2024])
 # predictSoilandPercentCarbon([2020])
 
 
