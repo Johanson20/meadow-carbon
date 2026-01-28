@@ -15,10 +15,11 @@ for asset in assets_2007: ee.data.deleteAsset(asset)
 
 # set visibility of all assets
 acl_update = {'all_users_can_read': True}
+asset = "projects/ee-jonyegbula/assets/"
 for year in range(1984, 2025):
-    tifs = glob.glob(f"files/{year}*.tif")
+    tifs = glob.glob(f"files/results/{year}*.tif")
     for tif in tifs:
-        asset_id = asset + tif[6:-4]
+        asset_id = asset + tif[14:-4]
         ee.data.setAssetAcl(asset_id, acl_update)
     print(year, end=' ')
 
@@ -50,7 +51,7 @@ jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
 
 for year in range(1984, 2025):
     outfile = f'files/results/{year}_Meadows.csv'
-    statsfile = f'files/{year}_Meadows_stats.csv'
+    statsfile = f'files/results/{year}_Meadows_stats.csv'
     stats = pd.read_csv(statsfile)
     stats['ID'], stats['PixelCount'] = [int(x) for x in stats['ID']], [int(x) for x in stats['PixelCount']]
     allID, allJep = [], []
