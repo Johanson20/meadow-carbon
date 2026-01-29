@@ -260,13 +260,17 @@ def predictSoilandPercentCarbon(years):
     percentc_col, soilc_col = list(bgb_percentc_model.feature_names_in_), list(bgb_soilc_model.feature_names_in_)
     mycols = ['ID','X','Y','PercentC','SoilC']
     
-    for year in years:
+    for myYear in years:
         # loop through each csv file and predict soil and percentage carbon based on model (per year)
-        outfile = f"files/results/{year}_Meadows.csv"
-        all_files = [f for f in glob.glob(f"files/{year}/*.csv")]
+        outfile = f"files/results/{myYear}_Meadows.csv"
+        all_files = [f for f in glob.glob(f"files/{myYear}/*.csv")]
         all_data = pd.DataFrame(columns=mycols)
+        
         for file in all_files:
-            df = pd.read_csv(file)
+            files = [f"{file[:6]}{year}{file[10:18]}{year}{file[22:]}" for year in range(myYear-4, myYear+1)]
+            dfs = [pd.read_csv(f) for f in files if os.path.exists(f)]
+            all_pixels = pd.concat(dfs, ignore_index=True)
+            df = (all_pixels.groupby(['X', 'Y']).mean(numeric_only=True).reset_index())
             df['ID'] = int(file.split("_")[2][:-4])
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
             df['PercentC'] = bgb_percentc_model.predict(df.loc[:, percentc_col])
@@ -285,7 +289,7 @@ def predictSoilandPercentCarbon(years):
         gdf['PercentC']  = all_data['PercentC']
         gdf['SoilC']  = all_data['SoilC']
         gdf.to_csv(outfile, index=False)
-        print(year, end='. ')
+        print(myYear, end='. ')
         
         # generate geotiffs for predictions at 30m resolution (same as splitCSVToGeotiffs function)
         utm_lons, utm_lats = all_data['X'], all_data['Y']
@@ -301,7 +305,7 @@ def predictSoilandPercentCarbon(years):
             all_data.drop(attribute, axis=1, inplace=True)
             print(attribute, "done!")
 
-# predictSoilandPercentCarbon(list(range(1985, 2025, 5)) + [1986, 2024])
+# predictSoilandPercentCarbon(list(range(1990, 2025, 5)) + [2024])
 # predictSoilandPercentCarbon([2020])
 
 

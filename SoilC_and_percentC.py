@@ -79,7 +79,7 @@ def getBandValues(image):
     return ee.Feature(None, values).set('Date', date)
 
 
-def gridmetValues(image):
+def gridmetValues(image):   # same as getBandValues (without indices: for non-Landsat datasets)
     values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
     return ee.Feature(None, values).set('Date', date)
@@ -87,7 +87,7 @@ def gridmetValues(image):
 
 # get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def extractActiveGrowth(landsat, target_date):
-    # get band values and ensure it is not null
+    # extract previous 5 years of Landsat and Gridmet band values, and ensure it is not null
     year, month, day = target_date.split("-")
     prev_5_year = f"{str(int(year)-5)}-{month}-{day}"
     landsat_values = landsat.map(getBandValues).getInfo()['features']
@@ -106,21 +106,22 @@ def extractActiveGrowth(landsat, target_date):
         G_values.append(feature['properties'])
     df = pd.DataFrame(L_values)
     df_grid = pd.DataFrame(G_values)
+    
+    # convert date to proper datetime format and set as column
     df['Date'] = pd.to_datetime(df['Date'])
     df_grid['Date'] = pd.to_datetime(df_grid['Date'])
     df.drop_duplicates(subset='Date', inplace=True)
     df.dropna(inplace=True)
-    
-    # Set the 'date' column as the index, re-index and linearly interpolate Landsat/Gridmet bands at daily frequency
+    # Linearly interpolate Landsat/Gridmet band values at daily frequency; then combine to single dataframe
     df_daily = df.set_index('Date')
     df_grid = df_grid.set_index('Date')
     date_range = pd.date_range(start=prev_5_year, end=target_date, freq='D')[:-1]
     df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill()
     df_daily.dropna(inplace=True)
     df_5_years = pd.concat([df_daily, df_grid], axis=1)
-    df_5_years['NDSI'] = (df_5_years['Green'] - df_5_years['SWIR_1'])/(df_5_years['Green'] + df_5_years['SWIR_1'])
     
     # Active growing season is also when NDVI >= 0.2 without snow or water coverage, at above zero temperature
+    df_5_years['NDSI'] = (df_5_years['Green'] - df_5_years['SWIR_1'])/(df_5_years['Green'] + df_5_years['SWIR_1'])
     df_non_snow = df_5_years[(df_5_years.NDSI <= 0.2)]
     df_non_snow['Year'] = df_non_snow.index.year
     df_growthdays = df_non_snow[(df_non_snow.NDVI > 0.2) & (df_non_snow.NDWI <= 0.5) & (df_non_snow.tmmn > 273.15)]
@@ -134,6 +135,7 @@ def extractActiveGrowth(landsat, target_date):
     return [integrals[:13], round(active_growth_days)]
 
 
+# resample datasets for UTM Zone 10 and 11 which cover Sierra Nevada
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -149,7 +151,7 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 landsat_June = landsat_collection.filterDate("1999-06-01", "2024-06-30").filter(ee.Filter.calendarRange(6, 6, 'month'))
 landsat_Sept = landsat_collection.filterDate("1999-09-01", "2024-09-30").filter(ee.Filter.calendarRange(9, 9, 'month'))
 
-# flow accumulation (463.83m resolution); terraclimate (4638.3m resolution); slope and elevation (10.2m resolution); 
+# terraclimate and gridmet (4638.3m resolution); slope and elevation (10.2m resolution); 
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['aet', 'pr', 'swe']).map(resample10)
@@ -166,6 +168,7 @@ hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean
 perc_sand = ee.ImageCollection('projects/sat-io/open-datasets/polaris/sand_mean').select("b1").map(resample10)
 lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
+# average of depths up to 30cm are used for shallow datasets; 30-60cm used as deep 
 shallow_perc_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
 deep_perc_clay = ee.Image(perc_clay.toList(6).get(3))
 shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
@@ -185,9 +188,10 @@ deep_hydra_cond_11 = ee.Image(hydra_cond_11.toList(6).get(3))
 shallow_perc_sand_11 = ee.ImageCollection(perc_sand_11.toList(3)).mean()
 deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 
+# create empty dataframe to save extracted values into
 data[['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDMI_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June',
       'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept',
-      'NDMI_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept',  'SWIR_2_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 'dNDMI', 'dNDPI', 'dNDVI', 'dNDWI', 'dIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'Evapotranspiration', 'Precipitation', 'SWE', 'SRad', 'Min_Temp', 'Max_Temp', 'Active_growth_days', 'Elevation','Slope','Shallow_Clay','Shallow_Sand', 'Shallow_Hydra_Conduc', 'Deep_Clay', 'Deep_Sand', 'Deep_Hydra_Conduc', 'Lithology']] = None
+      'NDMI_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept',  'SWIR_2_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 'dNDMI', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'AET', 'Annual_Precipitation', 'SWE', 'SRad', 'Minimum_temperature', 'Maximum_temperature', 'Active_growth_days', 'Elevation','Slope','Shallow_Clay','Shallow_Sand', 'Shallow_Hydra_Conduc', 'Deep_Clay', 'Deep_Sand', 'Deep_Hydra_Conduc', 'Lithology']] = None
 
 # populate bands by applying above functions for each pixel in dataframe
 def bandsRun(idx):
@@ -203,7 +207,7 @@ def bandsRun(idx):
             data.drop(idx, inplace=True)
             print("Row", idx, "dropped!")
         
-        # compute 5 year average of landsat bands/indices in June and September
+        # compute 5 year average of landsat bands/indices in June/September; compute integrals and active growth days
         June_landsat = calculateIndices(landsat_June.filterBounds(point).filterDate(prev_5_year, target_date).mean())
         Sept_landsat = calculateIndices(landsat_Sept.filterBounds(point).filterDate(prev_5_year, target_date).mean())
         bands_June = June_landsat.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
@@ -211,7 +215,7 @@ def bandsRun(idx):
         landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, target_date)
         integrals, growth_days = extractActiveGrowth(landsat, target_date)
         
-        # compute values from daymetv4 (1km resolution) and terraclimate (resolution of both is 4,638.3m)
+        # compute values from daymetv4 (1km resolution), also gridmet and terraclimate (resolution are both 4,638.3m)
         if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
             terra_values = terraclimate_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
             grid_values = gridmet_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
@@ -245,16 +249,17 @@ def bandsRun(idx):
         print(idx)
         return [None]*55
 
-
+# use paralle code to extract values to dataframe (GEE limit of 40 concurrent requests: 15 threads chosen)
 with Parallel(n_jobs=15, prefer="threads") as parallel:
     result = parallel(delayed(bandsRun)(meadowIdx) for meadowIdx in range(data.shape[0]))
 cols = list(data.columns)
 for idx in range(len(result)):
     data.loc[idx, cols[10:]] = result[idx]
 
-data['Evapotranspiration'] *= 0.1
-data['Min_Temp'] -= 273.15
-data['Max_Temp'] -= 273.15
+# apply scale to AET; convert temperature to celsius
+data['AET'] *= 0.1
+data['Minimum_temperature'] -= 273.15
+data['Maximum_temperature'] -= 273.15
 data.head()
 # write updated dataframe to new csv file
 data.to_csv(filename.split(".csv")[0] + "_Data.csv", index=False)
@@ -280,7 +285,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[10:-1])
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDMI_June', 'NDVI_June', 'NDMI_Sept', 'NDVI_Sept', 'dNDMI']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -345,7 +350,7 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=100, subsample=0.6,
+bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=25, subsample=0.4,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -384,11 +389,11 @@ test_corr = np.corrcoef(y_test, y_test_pred)
 val = (y_test_pred - y_test) / y_test
 test_p_bias = np.mean(val[np.isfinite(val)]) * 100
 
-print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(train_rmse, train_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient matrix (R) = {}".format(train_mape, train_corr[0][1]))
-print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {}\nMean Absolute Error (MAE) = {}".format(test_rmse, test_mae))
-print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {} %\nCorrelation coefficient (R) = {}".format(test_mape, test_corr[0][1]))
-print("\nMean Training Percentage Bias = {} %\nMean Test Percentage Bias = {} %".format(train_p_bias, test_p_bias))
+print("\nTRAINING DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(train_rmse, train_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient matrix (R) = {:.4f}".format(train_mape, train_corr[0][1]))
+print("\nTEST DATA:\nRoot Mean Squared Error (RMSE) = {:.4f}\nMean Absolute Error (MAE) = {:.4f}".format(test_rmse, test_mae))
+print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorrelation coefficient (R) = {:.4f}".format(test_mape, test_corr[0][1]))
+print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
 feat_imp = bgb_soilc_model.feature_importances_
@@ -433,7 +438,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = list(cols[10:-1])
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDMI_June', 'NDVI_June', 'NDMI_Sept', 'NDVI_Sept', 'dNDMI']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -497,7 +502,7 @@ train_data['percentCarbon'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=9, n_estimators=200, subsample=0.9,
+bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=6, n_estimators=25, subsample=1.0,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 bgb_percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
