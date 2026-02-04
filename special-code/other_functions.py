@@ -256,8 +256,8 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
 def predictSoilandPercentCarbon(years):
     # extract models for soil and percentage carbon
     with open('csv/bgb_carbon_models.pckl', 'rb') as f:
-        bgb_percentc_model, bgb_soilc_model = pickle.load(f)
-    percentc_col, soilc_col = list(bgb_percentc_model.feature_names_in_), list(bgb_soilc_model.feature_names_in_)
+        percentc_model, soilc_model = pickle.load(f)
+    percentc_col, soilc_col = list(percentc_model.feature_names_in_), list(soilc_model.feature_names_in_)
     mycols = ['ID','X','Y','PercentC','SoilC']
     
     for myYear in years:
@@ -273,8 +273,8 @@ def predictSoilandPercentCarbon(years):
             df = (all_pixels.groupby(['X', 'Y']).mean(numeric_only=True).reset_index())
             df['ID'] = int(file.split("_")[2][:-4])
             zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
-            df['PercentC'] = bgb_percentc_model.predict(df.loc[:, percentc_col])
-            df['SoilC'] = bgb_soilc_model.predict(df.loc[:, soilc_col])
+            df['PercentC'] = percentc_model.predict(df.loc[:, percentc_col])
+            df['SoilC'] = soilc_model.predict(df.loc[:, soilc_col])
             # convert negative predictions to 0 and save predictions to another file
             df.loc[df['PercentC'] < 0, 'PercentC'] = 0
             df.loc[df['SoilC'] < 0, 'SoilC'] = 0

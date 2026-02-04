@@ -217,7 +217,7 @@ def bandsRun(idx):
         
         # compute values from daymetv4 (1km resolution), also gridmet and terraclimate (resolution are both 4,638.3m)
         if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
-            terra_values = terraclimate_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
+            terra_values = terraclimate_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
             grid_values = gridmet_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
             elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
             slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
@@ -229,7 +229,7 @@ def bandsRun(idx):
             deep_sand = deep_perc_sand_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
             lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         else:
-            terra_values = terraclimate.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
+            terra_values = terraclimate.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
             grid_values = gridmet.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
             elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
             slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
@@ -240,11 +240,13 @@ def bandsRun(idx):
             shallow_sand = shallow_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
             deep_sand = deep_perc_sand.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
             lith = lithology.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-            
-        avg_terra_values = terra_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+        
+        snow_we = terra_values.filter(ee.Filter.calendarRange(4, 4, 'month')).mean()
+        swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
+        avg_terra_values = terra_values.mean().reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
         avg_grid_values = grid_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
         if idx%50 == 0: print(idx, end=' ')
-        return list(bands_June.values()) + list(bands_Sept.values()) + list(integrals) + list(avg_terra_values.values()) + list(avg_grid_values.values()) + [growth_days, elev, slope_value, shallow_clay, shallow_sand, shallow_hydra, deep_clay, deep_sand, deep_hydra, lith] 
+        return list(bands_June.values()) + list(bands_Sept.values()) + list(integrals) + list(avg_terra_values.values())[:2] + [swe_value] + list(avg_grid_values.values()) + [growth_days, elev, slope_value, shallow_clay, shallow_sand, shallow_hydra, deep_clay, deep_sand, deep_hydra, lith] 
     except:
         print(idx)
         return [None]*55
@@ -285,7 +287,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDMI_June', 'NDVI_June', 'NDMI_Sept', 'NDVI_Sept', 'dNDMI']]
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDVI_June', 'NDVI_Sept']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -350,9 +352,9 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_soilc_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=25, subsample=0.4,
+soilc_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=8, n_estimators=25, subsample=0.4,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-bgb_soilc_model.fit(X_train, y_train)
+soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
@@ -361,7 +363,7 @@ with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
         axes = axes.flatten()
         for j, feature in enumerate(page_features):
             ax = axes[j]
-            PartialDependenceDisplay.from_estimator(bgb_soilc_model, data[var_col], [feature], random_state=10, ax=ax)
+            PartialDependenceDisplay.from_estimator(soilc_model, data[var_col], [feature], random_state=10, ax=ax)
             ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
         # Remove unused axes
         for j in range(len(page_features), 9):
@@ -370,10 +372,10 @@ with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
         pdf.savefig(fig)
         plt.close(fig)
 
-len(bgb_soilc_model.estimators_)  # number of trees used in estimation
+len(soilc_model.estimators_)  # number of trees used in estimation
 # print relevant stats
-y_train_pred = bgb_soilc_model.predict(X_train)
-y_test_pred = bgb_soilc_model.predict(X_test)
+y_train_pred = soilc_model.predict(X_train)
+y_test_pred = soilc_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -396,9 +398,12 @@ print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorr
 print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
-feat_imp = bgb_soilc_model.feature_importances_
+feat_imp = soilc_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# write variable importance to csv
+df = pd.DataFrame({"Variable":  np.array(soilc_model.feature_names_in_)[sorted_idx], "Importance":  np.array(soilc_model.feature_importances_)[sorted_idx]})
+df.to_csv("files/SoilC_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)
@@ -408,16 +413,16 @@ y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(bgb_soilc_model.feature_names_in_)[sorted_idx])
+    plt.yticks(pos, np.array(soilc_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 
-def plotY():
+def plotTestY(var):
     plt.scatter(y_test, y_test_pred, color='g')
     plt.plot(y_test, y_pred, color='k', label='Regression line')
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title(f"Test set (y_test); R = {np.round(test_corr[0][1], 4)}")
+    plt.title(f"Test Data of {var}")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(y_test), max(y_test_pred))) + 2
     plt.xlim((0, axes_lim))
@@ -425,8 +430,9 @@ def plotY():
     plt.legend()
 
 plotFeatureImportance()
-plotY()
-
+plotTestY("Soil Carbon Stock")
+np.array(soilc_model.feature_names_in_)[sorted_idx]
+np.array(soilc_model.feature_importances_)[sorted_idx]
 
 # read csv containing random samples and model percent carbon
 data = pd.read_csv('csv/Soil Carbon_RS Model_Data.csv')
@@ -438,7 +444,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDMI_June', 'NDVI_June', 'NDMI_Sept', 'NDVI_Sept', 'dNDMI']]
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDVI_June', 'NDVI_Sept']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -502,9 +508,9 @@ train_data['percentCarbon'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-bgb_percentc_model = GradientBoostingRegressor(learning_rate=0.2, max_depth=6, n_estimators=25, subsample=1.0,
+percentc_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=7, n_estimators=25, subsample=0.8,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-bgb_percentc_model.fit(X_train, y_train)
+percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
 with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
@@ -513,7 +519,7 @@ with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
         axes = axes.flatten()
         for j, feature in enumerate(page_features):
             ax = axes[j]
-            PartialDependenceDisplay.from_estimator(bgb_percentc_model, data[var_col], [feature], random_state=10, ax=ax)
+            PartialDependenceDisplay.from_estimator(percentc_model, data[var_col], [feature], random_state=10, ax=ax)
             ax.set_title(f'Partial Dependence of {feature}', fontsize=10)
         # Remove unused axes
         for j in range(len(page_features), 9):
@@ -522,10 +528,10 @@ with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
         pdf.savefig(fig)
         plt.close(fig)
 
-len(bgb_percentc_model.estimators_)  # number of trees used in estimation
+len(percentc_model.estimators_)  # number of trees used in estimation
 # print relevant stats
-y_train_pred = bgb_percentc_model.predict(X_train)
-y_test_pred = bgb_percentc_model.predict(X_test)
+y_train_pred = percentc_model.predict(X_train)
+y_test_pred = percentc_model.predict(X_test)
 
 train_mae = mean_absolute_error(y_train, y_train_pred)
 train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
@@ -548,9 +554,12 @@ print("\nMean Absolute Percentage Error (MAPE) Over Predictions = {:.4f} %\nCorr
 print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 # plot Feature importance
-feat_imp = bgb_percentc_model.feature_importances_
+feat_imp = percentc_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# write variable importance to csv
+df = pd.DataFrame({"Variable":  np.array(percentc_model.feature_names_in_)[sorted_idx], "Importance":  np.array(percentc_model.feature_importances_)[sorted_idx]})
+df.to_csv("files/PercentC_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)
@@ -560,12 +569,14 @@ y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(bgb_percentc_model.feature_names_in_)[sorted_idx])
+    plt.yticks(pos, np.array(percentc_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 
 plotFeatureImportance()
-plotY()
+plotTestY("Percentage Carbon")
+np.array(percentc_model.feature_names_in_)[sorted_idx]
+np.array(percentc_model.feature_importances_)[sorted_idx]
 
 f = open('csv/bgb_carbon_models.pckl', 'wb')
-pickle.dump([bgb_percentc_model, bgb_soilc_model], f)
+pickle.dump([percentc_model, soilc_model], f)
 f.close()

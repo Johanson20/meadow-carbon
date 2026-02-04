@@ -390,6 +390,9 @@ print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {
 feat_imp = ghg_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# write variable importance to csv
+df = pd.DataFrame({"Variable":  np.array(ghg_model.feature_names_in_)[sorted_idx], "Importance":  np.array(ghg_model.feature_importances_)[sorted_idx]})
+df.to_csv("files/GHG_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)

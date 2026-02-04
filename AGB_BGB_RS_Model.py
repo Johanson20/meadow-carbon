@@ -574,13 +574,16 @@ print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {
 feat_imp = bgb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# write variable importance to csv
+df = pd.DataFrame({"Variable":  np.array(bgb_model.feature_names_in_)[sorted_idx], "Importance":  np.array(bgb_model.feature_importances_)[sorted_idx]})
+df.to_csv("files/BGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
     plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx])
     plt.title("Feature Importance")
 
-def plotTestY():
+def plotTestY(var):
     # Make regression line over y_test and it's predictions
     regressor = LinearRegression()
     test_y = np.array(y_test).reshape(-1,1)
@@ -592,7 +595,7 @@ def plotTestY():
     plt.plot(test_y, test_y, linestyle='dotted', color='gray', label='1:1 line')
     plt.xlabel('Actual ' + y_field)
     plt.ylabel("Predicted " + y_field)
-    plt.title("BGB Plot for Test data")
+    plt.title(f"{var} Plot for Test data")
     # Make axes of equal extents
     axes_lim = np.ceil(max(max(test_y), max(test_pred_y))) + 2
     plt.xlim((0, axes_lim))
@@ -619,7 +622,7 @@ def plotTrainY():
     plt.legend()
 
 plotFeatureImportance()
-plotTestY()
+plotTestY("BGB")
 plotTrainY()
 np.array(bgb_model.feature_names_in_)[sorted_idx]
 np.array(bgb_model.feature_importances_)[sorted_idx]
@@ -766,6 +769,9 @@ print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {
 feat_imp = agb_model.feature_importances_
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
+# write variable importance to csv
+df = pd.DataFrame({"Variable":  np.array(agb_model.feature_names_in_)[sorted_idx], "Importance":  np.array(agb_model.feature_importances_)[sorted_idx]})
+df.to_csv("files/AGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
     plt.barh(pos, feat_imp[sorted_idx], align="center")
@@ -773,7 +779,7 @@ def plotFeatureImportance():
     plt.title("Feature Importance")
 
 plotFeatureImportance()
-plotTestY()
+plotTestY("AGB")
 plotTrainY()
 np.array(agb_model.feature_names_in_)[sorted_idx]
 np.array(agb_model.feature_importances_)[sorted_idx]
