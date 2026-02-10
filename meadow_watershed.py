@@ -170,6 +170,7 @@ shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
+allIds = shapefile.ID
 
 
 def downloadMeadowBands(meadowId):
