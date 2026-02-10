@@ -16,6 +16,7 @@ import contextlib
 import geemap
 from datetime import datetime
 from shapely.geometry import Polygon
+from joblib import Parallel, delayed
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
@@ -198,6 +199,9 @@ def downloadMeadowBands(meadowId):
 
 # downloadMeadowBands(15508)
 # downloadMeadowBands(15474)
+
+with Parallel(n_jobs=18, prefer="threads") as parallel:
+    result = parallel(delayed(downloadMeadowBands)(meadowId) for meadowId in allIds)
 
 
 if __name__ == "__main__":
