@@ -172,7 +172,7 @@ shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
-bandnames = ['Y', 'X', 'Organic_Matter', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Silt', 'Deep_Silt', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Shallow_Water_Content', 'Deep_Water_Content', 'geometry']
+bandnames = ['Y', 'X', 'Organic_Matter', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Silt', 'Deep_Silt', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Shallow_Water_Content', 'Deep_Water_Content']
 allIds = shapefile.ID
 
 
@@ -206,25 +206,43 @@ def downloadMeadowBands(meadowId):
 def geotiffsToDataFrame():
     # creates a single dataframe of all geotiffs
     all_files = [f for f in glob.glob("files/meadow_prioritization/Meadow_Polaris*.tif")]
-    all_data = gpd.GeoDataFrame(columns=bandnames, crs=4326)
-    for file in all_files:  # read and extract bands of each Polaris geotiff before combining all
+    all_data = pd.DataFrame(columns=bandnames)
+    # create list of lists to store each Polaris band
+    allcols = [[], [], [], [], [], [], [], [], [], [], []]
+    zones = []
+    # read and extract bands of each Polaris geotiff before combining all
+    for file in all_files:
         with rasterio.Env(CPL_LOG='ERROR'):
             geotiff = xr.open_rasterio(file)
         df = geotiff.to_dataframe(name='value').reset_index()
         geotiff.close()
         df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+        # extract meadow ID and EPSG zone
         meadowId = int(file.split("_")[3][:-4])
         zone = shapefile[shapefile.ID == meadowId].iloc[0].epsgCode
         # rename columns to bandnames and convert coordinates to EPSG 4326 (lat/lon)
-        df.columns = bandnames[:-1]
-        utm_lons, utm_lats = df['X'], df['Y']
-        pixel_values = df[bandnames[2:-1]]
-        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone).to_crs(4326)
-        all_data = pd.concat([all_data, gdf])
+        cols = df.columns
+        for i in range(len(cols)):
+            allcols[i].extend(df[cols[i]])
+        zones.extend([zone]*df.shape[0])
     
-    print("Process all Polaris geotiffs!")
+    # populate dataframe with values from lists and convert to geodataframe with lat/lon
+    cols = all_data.columns
+    for i in range(len(cols)):
+        all_data[cols[i]] = allcols[i]
+    all_data['Zone'] = zones
+    utm_lons, utm_lats = all_data['X'], all_data['Y']
+    pixel_values = all_data[bandnames[2:] + ['Zone']]
+    all_data = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats))
+    for zone in set(zones):
+        mask = all_data["Zone"] == zone
+        all_data.loc[mask] = (all_data.loc[mask].set_crs(zone, allow_override=True)
+        .to_crs(4326))
+    print("Processed all Polaris geotiffs!")
+    
+    # same process as above but for DEM bands
     all_files = [f for f in glob.glob("files/meadow_prioritization/Meadow_DEM*.tif")]
-    Elev, Slope = [], []    # same process as polaris but add DEM bands
+    Elev, Slope = [], []
     for file in all_files:
         with rasterio.Env(CPL_LOG='ERROR'):
             geotiff = xr.open_rasterio(file)
@@ -233,13 +251,20 @@ def geotiffsToDataFrame():
         df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
         Elev.extend(df[1])
         Slope.extend(df[2])
-    # add DEM columns and format coordinates to single columns
+    # add DEM columns and drop duplicates
     all_data['Elevation'], all_data['Slope'] = Elev, Slope
+    all_data.drop_duplicates(inplace=True)
+    all_data.reset_index(drop=True, inplace=True)
     
+    # create X and Y coordinates explicitly from geometry column and add watershed IDs
     all_data['X'], all_data['Y'] = [p.x for p in all_data.geometry], [p.y for p in all_data.geometry]
     all_data = gpd.sjoin(all_data,  watershed[['HUC_12', 'geometry']], how='left', predicate='within')
-    all_data.drop(['geometry', 'index_right'], axis=1, inplace=True)
+    # drop unnecessary columns and write dataframe to csv file
+    all_data.drop(['geometry', 'index_right', 'Zone'], axis=1, inplace=True)
     all_data.to_csv("files/meadow_prioritization/All_Meadow_rows.csv", index=False)
+    # summarize pixels by watersheds (HUC_12)
+    summary = all_data.groupby('HUC_12')[bandnames[2:]].agg(['mean', 'median', 'std']).reset_index()
+    summary.to_csv("files/meadow_prioritization/Watershed_stats.csv", index=False)
 
 
 # downloadMeadowBands(15508)
