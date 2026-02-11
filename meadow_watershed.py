@@ -9,12 +9,14 @@ import os
 import ee
 import warnings
 import numpy as np
+import pandas as pd
 import time
 import geopandas as gpd
-import multiprocessing
 import contextlib
+import glob
+import rasterio
+import rioxarray as xr
 import geemap
-from datetime import datetime
 from shapely.geometry import Polygon
 from joblib import Parallel, delayed
 
@@ -170,11 +172,15 @@ shapefile['epsgCode'] = "EPSG:32611"
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 shapefile.loc[shapefile['ID'].isin(allIds), 'epsgCode'] = "EPSG:32610"
+bandnames = ['Y', 'X', 'Organic_Matter', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Silt', 'Deep_Silt', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Shallow_Water_Content', 'Deep_Water_Content', 'geometry']
 allIds = shapefile.ID
 
 
 def downloadMeadowBands(meadowId):
     try:
+        imageDEMname = f'files/meadow_prioritization/Meadow_DEM_{meadowId}'
+        if os.path.exists(imageDEMname+".tif"):
+            return [meadowId]*2
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile[shapefile.ID == meadowId].iloc[0]
         mycrs = feature.epsgCode
@@ -189,13 +195,51 @@ def downloadMeadowBands(meadowId):
         combined_polaris_image = generateCombinedPolarisImage(mycrs, shapefile_bbox)
         imagePolarisName = f'files/meadow_prioritization/Meadow_Polaris_{meadowId}'
         combined_dem_image = generateCombinedDEMImage(mycrs, shapefile_bbox)
-        imageDEMname = f'files/meadow_prioritization/Meadow_DEM_{meadowId}'
         retrievePolarisId = downloadImageBands(shapefile_bbox, imagePolarisName, feature, combined_polaris_image)
         retrieveDEMId = downloadImageBands(shapefile_bbox, imageDEMname, feature, combined_dem_image)
         
-        return [retrievePolarisId, retrieveDEMId]
+        return [retrievePolarisId, retrieveDEMId]   # the same as meadowID
     except:
         return [-1, -1]
+
+
+def geotiffsToDataFrame():
+    # creates a single dataframe of all geotiffs
+    all_files = [f for f in glob.glob("files/meadow_prioritization/Meadow_Polaris*.tif")]
+    all_data = gpd.GeoDataFrame(columns=bandnames, crs=4326)
+    for file in all_files:  # read and extract bands of each Polaris geotiff before combining all
+        with rasterio.Env(CPL_LOG='ERROR'):
+            geotiff = xr.open_rasterio(file)
+        df = geotiff.to_dataframe(name='value').reset_index()
+        geotiff.close()
+        df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+        meadowId = int(file.split("_")[3][:-4])
+        zone = shapefile[shapefile.ID == meadowId].iloc[0].epsgCode
+        # rename columns to bandnames and convert coordinates to EPSG 4326 (lat/lon)
+        df.columns = bandnames[:-1]
+        utm_lons, utm_lats = df['X'], df['Y']
+        pixel_values = df[bandnames[2:-1]]
+        gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=zone).to_crs(4326)
+        all_data = pd.concat([all_data, gdf])
+    
+    print("Process all Polaris geotiffs!")
+    all_files = [f for f in glob.glob("files/meadow_prioritization/Meadow_DEM*.tif")]
+    Elev, Slope = [], []    # same process as polaris but add DEM bands
+    for file in all_files:
+        with rasterio.Env(CPL_LOG='ERROR'):
+            geotiff = xr.open_rasterio(file)
+        df = geotiff.to_dataframe(name='value').reset_index()
+        geotiff.close()
+        df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+        Elev.extend(df[1])
+        Slope.extend(df[2])
+    # add DEM columns and format coordinates to single columns
+    all_data['Elevation'], all_data['Slope'] = Elev, Slope
+    
+    all_data['X'], all_data['Y'] = [p.x for p in all_data.geometry], [p.y for p in all_data.geometry]
+    all_data = gpd.sjoin(all_data,  watershed[['HUC_12', 'geometry']], how='left', predicate='within')
+    all_data.drop(['geometry', 'index_right'], axis=1, inplace=True)
+    all_data.to_csv("files/meadow_prioritization/All_Meadow_rows.csv", index=False)
 
 
 # downloadMeadowBands(15508)
@@ -203,10 +247,3 @@ def downloadMeadowBands(meadowId):
 
 with Parallel(n_jobs=18, prefer="threads") as parallel:
     result = parallel(delayed(downloadMeadowBands)(meadowId) for meadowId in allIds)
-
-
-if __name__ == "__main__":
-    start = datetime.now()
-    with multiprocessing.Pool(processes=18, maxtasksperchild=50) as pool:
-        bandresult = pool.map(downloadMeadowBands, allIds)
-    print(f"Pre-processing completed in {datetime.now() - start}")
