@@ -99,8 +99,8 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 
 # create empty dataframe, one for each meadow
-meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Image_Date',
-            'Image_Time', 'Days_Difference', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
+meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Description',
+            'Image_Date', 'Image_Time', 'Days_Difference', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
             'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDMI_mean',
             'NDMI_median', 'NDMI_std', 'ANPP_mean', 'ANPP_std'])
 
@@ -150,10 +150,10 @@ for meadowIdx in range(meadows.shape[0]):
     band_values, NDWI_pixels, time_diff, image_date, image_time = meadow_values
     NDWI_pixels = list(NDWI_pixels.values())[:4]
     if NDWI_pixels[1]: NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
-    meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, image_date, image_time, 
+    meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, feature.Relate, image_date, image_time, 
                                       time_diff] + NDWI_pixels + band_values + NPP_vals
     # print progress for every 20 meadows processed
-    if meadowIdx%20 == 0: print(meadowIdx, end=', ')
+    if meadowIdx%50 == 0: print(meadowIdx, end=', ')
 
 # check how many meadows had data successfully extracted
 len([x for x in meadow_data['BSI_mean'] if x])
