@@ -106,10 +106,10 @@ meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID
 
 # define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
 my_year = str(meadows.DtFire[0].year)
-meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=meadows.crs)
+meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
 data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
 # spatial join between each pixel of csv and meadow's geometry
-pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
+pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
 stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
 
@@ -131,7 +131,7 @@ for meadowIdx in range(meadows.shape[0]):
     if year != my_year:
         my_year = year
         data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
-        pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs="EPSG:4326")    
+        pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
         
@@ -152,7 +152,7 @@ for meadowIdx in range(meadows.shape[0]):
     if NDWI_pixels[1]: NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
     meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, feature.Relate, image_date, image_time, 
                                       time_diff] + NDWI_pixels + band_values + NPP_vals
-    # print progress for every 20 meadows processed
+    # print progress for every 50 meadows processed
     if meadowIdx%50 == 0: print(meadowIdx, end=', ')
 
 # check how many meadows had data successfully extracted
@@ -161,3 +161,56 @@ meadow_data.sort_values(by="UniqueID", inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
 meadow_data.to_csv("csv/fire_meadows_data.csv", index=False)
+
+
+# read meadow data for fires between 1984 and 2025 and extract NEP related variables
+epsg_crs = "EPSG:4326"
+meadows = gpd.read_file("files/meadowsFiresCombos_1984to2024_20251208.shp").to_crs(epsg_crs)
+meadows = meadows[meadows.rltnshp != "within_100m"]
+# sort the meadows by fire year
+meadows.sort_values(by="YEAR_", inplace=True)
+meadows.reset_index(drop=True, inplace=True)
+
+# create empty dataframe, one for each meadow
+meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'CalFireID', 'FireYear', 'Description',
+            'Area_km2', 'ANPP_mean', 'ANPP_std', 'BNPP_mean', 'BNPP_std', 'Rh_mean', 'Rh_std', 'NEP_mean', 'NEP_std'])
+
+# define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
+my_year = meadows.YEAR_[0]
+meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
+mycols = ['X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP']
+data = pd.read_csv(f"files/results/{my_year}_Meadows.csv", usecols=mycols)
+# spatial join between each pixel of csv and meadow's geometry
+pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
+joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
+stats = joined.groupby('index_right')[mycols[2:]].agg(['mean', 'std'])
+
+for meadowIdx in range(meadows.shape[0]):
+    feature = meadows.loc[meadowIdx, :]
+    year = feature.YEAR_
+    # read a new pixel level csv file when the next year is encountered (saves computational cost)
+    if year != my_year:
+        my_year = year
+        data = pd.read_csv(f"files/results/{my_year}_Meadows.csv", usecols=mycols)
+        pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
+        joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
+        stats = joined.groupby('index_right')[mycols[2:]].agg(['mean', 'std'])
+
+    try:    # check if valid NPPs are available for meadow
+        NPP_vals = list(stats.loc[meadowIdx, :])
+    except:
+        NPP_vals = [None]*8
+    
+    # append these values to dataframe
+    meadow_data.iloc[meadowIdx, :] = [feature.UniquID, feature.CalFrID, year, feature.rltnshp, feature.Are_km2] + NPP_vals
+    # print progress for every 100 meadows processed
+    if meadowIdx%100 == 0: print(meadowIdx, end=', ')
+
+# check how many meadows had data successfully extracted
+len([x for x in meadow_data['NEP_mean'] if x])
+nullIds = list(np.where(meadow_data['NEP_mean'].isnull())[0])
+meadow_data.drop(nullIds, inplace = True)
+meadow_data.reset_index(drop=True, inplace=True)
+meadow_data.head()
+# write updated dataframe to new csv file
+meadow_data.to_csv("csv/burned_meadows_1984_2025.csv", index=False)
