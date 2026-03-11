@@ -12,6 +12,7 @@ import pandas as pd
 import geopandas as gpd
 import ee
 from shapely.geometry import box
+from joblib import Parallel, delayed
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
@@ -41,8 +42,10 @@ def calculateIndices(image):
     ndwi = image.normalizedDifference(['Green', 'NIR']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
-    image = image.addBands([ndmi, evi, bsi, ndwi])
-    return image.select(["NDMI", "EVI", "BSI", "NDWI"])
+    savi = image.expression("(1.5 * (NIR - RED)) / (NIR + RED + 0.5)", {'RED': image.select('Red'), 'NIR': image.select('NIR')}).rename('SAVI')
+
+    image = image.addBands([ndmi, ndwi, evi, bsi, savi])
+    return image.select(["NDMI", "EVI", "BSI", "SAVI", "NDWI"])
 
 
 # Function to extract cloud free band values per pixel from landsat 8 or landsat 7
@@ -102,7 +105,8 @@ landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Description',
             'Image_Date', 'Image_Time', 'Days_Difference', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
             'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDMI_mean',
-            'NDMI_median', 'NDMI_std', 'ANPP_mean', 'ANPP_std'])
+            'NDMI_median', 'NDMI_std', 'SAVI_mean',
+            'SAVI_median', 'SAVI_std', 'ANPP_mean', 'ANPP_std'])
 
 # define the earliest year to read pixel level NPP data from and extract NPP data for all meadows
 my_year = str(meadows.DtFire[0].year)
@@ -113,7 +117,7 @@ pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y),
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
 stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
 
-for meadowIdx in range(meadows.shape[0]):
+def calcVariables(meadowIdx):
     # extract a single meadow and it's geometry bounds;
     feature = meadows.loc[meadowIdx, :]
     if feature.geometry.geom_type == 'Polygon':
@@ -125,9 +129,10 @@ for meadowIdx in range(meadows.shape[0]):
         target_date = feature.DtFire.strftime("%Y-%m-%d")
         year, month, day = target_date.split("-")
     except:     # skip null dates
-        continue
+        return [None]*25
     
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
+    global my_year
     if year != my_year:
         my_year = year
         data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
@@ -138,7 +143,7 @@ for meadowIdx in range(meadows.shape[0]):
     # extract data up to 30 days before fire date (can change date)
     meadow_values = getBandValues(shapefile_bbox, target_date, 30)
     if not meadow_values:     # skip rows that returned null band values
-        continue
+        return [None]*25
     
     try:    # check if valid NPPs are available for meadow
         NPP = stats.loc[meadowIdx, :]
@@ -150,13 +155,24 @@ for meadowIdx in range(meadows.shape[0]):
     band_values, NDWI_pixels, time_diff, image_date, image_time = meadow_values
     NDWI_pixels = list(NDWI_pixels.values())[:4]
     if NDWI_pixels[1]: NDWI_pixels[0], NDWI_pixels[2] = round(NDWI_pixels[1] * NDWI_pixels[0]), round(NDWI_pixels[2] * NDWI_pixels[3])
-    meadow_data.iloc[meadowIdx, :] = [feature.UniqueID, feature.FireID, target_date, feature.Relate, image_date, image_time, 
-                                      time_diff] + NDWI_pixels + band_values + NPP_vals
     # print progress for every 50 meadows processed
-    if meadowIdx%50 == 0: print(meadowIdx, end=', ')
+    if meadowIdx%100 == 0: print(meadowIdx, end=', ')
+    
+    return [feature.UniqueID, feature.FireID, target_date, feature.Relate, image_date, image_time, time_diff] + NDWI_pixels + band_values + NPP_vals
 
-# check how many meadows had data successfully extracted
+with Parallel(n_jobs=16, prefer="threads") as parallel:
+    result = parallel(delayed(calcVariables)(meadowIdx) for meadowIdx in range(meadows.shape[0]))
+    
+# write finals rows from results into csv file
+for idx in range(len(result)):
+    res = result[idx]
+    meadow_data.loc[idx] = res
+
+# check how many meadows had data successfully extracted and drop null rows
 len([x for x in meadow_data['BSI_mean'] if x])
+nullIds = list(np.where(meadow_data['BSI_mean'].isnull())[0])
+meadow_data.drop(nullIds, inplace = True)
+meadow_data.reset_index(drop=True, inplace=True)
 meadow_data.sort_values(by="UniqueID", inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
