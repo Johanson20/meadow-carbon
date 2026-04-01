@@ -5,7 +5,14 @@ Created on Mon Nov 24 13:17:24 2025
 @author: jonyegbula
 """
 
-import glob, ee
+import glob
+import os
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+import ee
+from matplotlib.colors import ListedColormap
+
 ee.Initialize()
 
 # delete assets for a particular year
@@ -103,14 +110,14 @@ for idx in range(data.shape[0]):
 
 for year in range(1984, 2025):
     # df = pd.read_csv(f"files/results/{year}_Meadows.csv")
-    data = pd.read_csv(f"files/{year}_Meadows_stats.csv")
+    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
     # data['ID'] = data['ID'].astype(int)
     # data = data.sort_values(by='ID', ascending=True)
     # data['NEP_Cap_1000_mean'] = list(df.groupby('ID')['NEP_Cap_1000'].mean())
     # data['NEP_sum'] = list(df.groupby('ID')['NEP'].sum())
     # data['NEP_Cap_1000_sum'] = list(df.groupby('ID')['NEP_Cap_1000'].sum())
     data[['NEP_Cap_1000_sum', 'NEP_sum']] *= 900
-    data.to_csv(f"files/{year}_Meadows_stats.csv", index=False)
+    data.to_csv(f"files/results/{year}_Meadows_stats.csv", index=False)
     print(year, end=' ')
     x = len([x for x in df['NEP'] if x >= 1000])
     val = x/df.shape[0]*100
@@ -314,7 +321,7 @@ df.to_csv("files/GHG_var_importance.csv", index=False)
 NEP_mean = []
 time_ser = range(1984, 2025)
 for year in time_ser:
-    data = pd.read_csv(f"files/{year}_Meadows_stats.csv")
+    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
     NEP_mean.append(data.NEP_mean.mean())
 df = pd.DataFrame({'Year': list(time_ser), 'NEP': NEP_mean})
 summary = df.groupby('Year')['NEP'].first()
@@ -330,3 +337,70 @@ with PdfPages('files/Histogram.pdf') as pdf:
     fig.tight_layout()
     pdf.savefig(fig)
     plt.close()
+
+
+# change ID of carbon model outputs to latest shapefile
+epsg_crs = "EPSG:4326"
+shapefile = gpd.read_file("files/SierraNevadaMeadow_V3.0.shp").to_crs(epsg_crs)
+shapefile2 = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+# this creates a new "ID_2" column with the updated (correct IDs) from the final shapefile
+for meadowIdx in range(shapefile2.shape[0]):
+    feature = shapefile2.loc[meadowIdx, :]
+    newFeat = shapefile.loc[shapefile.geometry.intersection(feature.geometry).area.idxmax()]
+    shapefile2.loc[meadowIdx, 'ID_2'] = newFeat.ID
+    if meadowIdx%1000 == 0: print(meadowIdx, end=' ')
+# save to file to be used for correcting others
+shapefile2.to_file("files/AllPossibleMeadows_2025-10-22.shp", driver="ESRI Shapefile")
+
+# create "ID_2" for meadow stats files
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+for year in range(1984, 2025):
+    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
+    data['ID_2'] = data['ID']
+    for meadowIdx in range(data.shape[0]):
+        oldId = data.loc[meadowIdx, :]
+        newID = shapefile[shapefile.ID == oldId.ID].iloc[0]
+        data.loc[meadowIdx, 'ID_2'] = newID.ID_2
+    data.to_csv(f"files/results/{year}_Meadows_stats.csv", index=False)
+    print(year, end=' ')
+
+# create "ID_2" for meadow pixel level files
+for year in range(1984, 2025):
+    data = pd.read_csv(f"files/results/{year}_Meadows.csv")
+    data['ID_2'] = data['ID']
+    oldID = set(data.ID)
+    for meadowId in oldID:
+        newID = shapefile[shapefile.ID == meadowId].iloc[0]
+        data.loc[(data.ID == meadowId), 'ID_2'] = newID.ID_2
+    data.to_csv(f"files/results/{year}_Meadows.csv", index=False)
+    print(year, end=' ')
+
+# rename all post-prediction geotiffs and csv outputs from carbon model (wasn't run due to ID conflicts: see 10320)
+for endname in ["tif", "csv"]:
+    for year in range(1984, 2025):
+        all_files = [f for f in glob.glob(f"files/{year}/*.{endname}")]
+        for file in all_files:
+            os.rename(file, file[:-4] + f"_name.{endname}")
+        all_files = [f for f in glob.glob(f"files/{year}/*.{endname}")]
+        for file in all_files:
+            newName = file.split("_")
+            oldId = int(newName[2])
+            newID = shapefile[shapefile.ID == oldId].iloc[0]
+            newName[2], newName[-1] = str(newID.ID_2), f".{endname}"
+            if oldId != newID.ID_2: os.rename(file, "_".join(newName))
+        print(year, end=' ')
+
+# rename all pre-prediction geotiffs from carbon model (wasn't run due to ID conflicts: see 10327 to 10320)
+endname = "csv"
+for year in range(1984, 2025):
+    all_files = [f for f in glob.glob(f"files/bands/{year}/*.{endname}")]
+    for file in all_files:
+        os.rename(file, file[:-4] + f"_name.{endname}")
+    all_files = [f for f in glob.glob(f"files/bands/{year}/*.{endname}")]
+    for file in all_files:
+        newName = file.split("_")
+        oldId = int(newName[2])
+        newID = shapefile[shapefile.ID == oldId].iloc[0]
+        newName[2], newName[-1] = str(newID.ID_2), f".{endname}"
+        if oldId != newID.ID_2: os.rename(file, "_".join(newName))
+    print(year, end=' ')
