@@ -349,6 +349,9 @@ for meadowIdx in range(shapefile2.shape[0]):
     newFeat = shapefile.loc[shapefile.geometry.intersection(feature.geometry).area.idxmax()]
     shapefile2.loc[meadowIdx, 'ID_2'] = newFeat.ID
     if meadowIdx%1000 == 0: print(meadowIdx, end=' ')
+# optionally simplify polygons (GEE allows at most 2,000,000 vertices for shapefiles)
+shapefile.geometry = shapefile.geometry.simplify(tolerance=0.00001, preserve_topology=True)
+shapefile.count_coordinates().sum()
 # save to file to be used for correcting others
 shapefile2.to_file("files/AllPossibleMeadows_2025-10-22.shp", driver="ESRI Shapefile")
 

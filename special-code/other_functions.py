@@ -376,3 +376,31 @@ def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
 
 # downloadFromDuplicatedDriveFolders("meadow_2021_", "files/bands/2021")
 # downloadFromDuplicatedDriveFolders("meadow_2019", "files/bands/2019", False)
+
+
+epsg_crs = "EPSG:4326"
+shapefile = gpd.read_file("files/StudyExtent_20260331.shp").to_crs(epsg_crs)
+
+perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1")
+perc_silt = ee.ImageCollection('projects/sat-io/open-datasets/polaris/silt_mean').select("b1")
+hydra_cond = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1")
+organic_m = ee.ImageCollection('projects/sat-io/open-datasets/polaris/om_mean').select("b1")
+
+shallow_clay = ee.ImageCollection(perc_clay.toList(3)).mean()
+deep_clay = ee.Image(perc_clay.toList(6).get(3))
+shallow_silt = ee.ImageCollection(perc_silt.toList(3)).mean()
+deep_silt = ee.Image(perc_silt.toList(6).get(3))
+shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
+deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
+shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
+
+# function to download a single variable for an entire region (Sierra Nevada used as example)
+def downloadOneGeotiff(GEEImage, shapefile, imagename, outfolder="", mycrs="EPSG:4326", res=30):
+    feature = shapefile.geometry.iloc[0]
+    shapefile_bbox = ee.Geometry.Polygon(list(feature.exterior.coords))
+    try:
+        geemap.ee_export_image(GEEImage.clip(shapefile_bbox), filename=outfolder + imagename, scale=res, crs=mycrs, region=shapefile_bbox)
+    except:
+        geemap.ee_export_image_to_drive(GEEImage.clip(shapefile_bbox), description=imagename, folder="tifs", crs=mycrs, region=shapefile_bbox, scale=res, maxPixels=1e13)
+
+downloadOneGeotiff(shallow_clay, shapefile, "SN_Shallow_Clay.tif", "files/")
