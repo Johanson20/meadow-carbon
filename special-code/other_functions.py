@@ -403,4 +403,4 @@ def downloadOneGeotiff(GEEImage, shapefile, imagename, outfolder="", mycrs="EPSG
     except:
         geemap.ee_export_image_to_drive(GEEImage.clip(shapefile_bbox), description=imagename, folder="tifs", crs=mycrs, region=shapefile_bbox, scale=res, maxPixels=1e13)
 
-downloadOneGeotiff(shallow_clay, shapefile, "SN_Shallow_Clay.tif", "files/")
+# downloadOneGeotiff(shallow_clay, shapefile, "SN_Shallow_Clay.tif", "files/")

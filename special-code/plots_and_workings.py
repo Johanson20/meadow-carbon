@@ -40,22 +40,19 @@ for year in range(1986, 2025):
     print(year, end=' ')
 store
 
+# convert biomass to NPP and scale NPP from Landsat/MODIS
 data[['ModisNPP', 'LandsatNPP']] *= 0.1
-
 data.loc[data['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
 data['ANPP'] = data['HerbBio.g.m2']*0.433
-
 data.loc[data['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
 data['Root_Turnover'] = (data['Roots.kg.m2']*0.49 - ((data['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
 data['Root_Exudates'] = data['Roots.kg.m2']*1000*data['Active_growth_days']*12*1.04e-4
 data['BNPP'] = data['Root_Turnover'] + data['Root_Exudates']
-
 data.head()
 
+# limit NEP values to 1000 and include ID/Jepson region in CSVs
 data = pd.read_csv("files/results/2024_Meadows.csv")
 jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
-
-
 for year in range(1984, 2025):
     outfile = f'files/results/{year}_Meadows.csv'
     statsfile = f'files/results/{year}_Meadows_stats.csv'
@@ -407,3 +404,19 @@ for year in range(1984, 2025):
         newName[2], newName[-1] = str(newID.ID_2), f".{endname}"
         if oldId != newID.ID_2: os.rename(file, "_".join(newName))
     print(year, end=' ')
+
+# assess significance of difference between mean and slope of NEP components before and after fires (5 year ranges)
+from scipy import stats
+df = pd.read_csv("csv/burned_meadows_5_year_stats.csv")
+mycols = ['ANPP', 'BNPP', 'Rh', 'NEP']
+vals = ["Mean", "Slope"]
+for val in vals:
+    for col in mycols:
+        t_stat, p_val = stats.ttest_ind(df[f'{col}_{val}_Bfr_Fire'], df[f'{col}_{val}_Aft_Fire'])
+        print(f"P-value for {val} of {col}: {p_val}") # If p < 0.05, the difference is significant
+
+plt.plot(range(df.shape[0]), df['NEP_Mean_Bfr_Fire'], color='green', label="Mean_NEP_Before_Fire")
+plt.plot(range(df.shape[0]), df['NEP_Mean_Aft_Fire'], color='red', label="Mean_NEP_After_Fire")
+plt.ylabel("Mean_NEP")
+plt.title(f"NEP Comparison Before and After Fire")
+plt.legend()
