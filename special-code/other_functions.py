@@ -255,7 +255,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
 
 def predictSoilandPercentCarbon(years):
     # extract models for soil and percentage carbon
-    with open('csv/bgb_carbon_models.pckl', 'rb') as f:
+    with open('csv/bgb_soil_models.pckl', 'rb') as f:
         percentc_model, soilc_model = pickle.load(f)
     percentc_col, soilc_col = list(percentc_model.feature_names_in_), list(soilc_model.feature_names_in_)
     mycols = ['ID','X','Y','PercentC','SoilC']

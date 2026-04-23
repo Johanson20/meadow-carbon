@@ -785,7 +785,7 @@ np.array(agb_model.feature_names_in_)[sorted_idx]
 np.array(agb_model.feature_importances_)[sorted_idx]
 
 
-with open('files/soil_models.pckl', 'wb') as f:   # there is also models.pckl
+with open('csv/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
-with open('files/sd_models.pckl', 'wb') as f:
+with open('csv/carbon_sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
