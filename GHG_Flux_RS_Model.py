@@ -401,8 +401,8 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(ghg_model.feature_names_in_)[sorted_idx])
+    plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
+    plt.yticks(pos, np.array(ghg_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotY():

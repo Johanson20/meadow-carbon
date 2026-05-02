@@ -49,14 +49,13 @@ def calculateIndices(image):
     
     # add indices
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
-    ndmi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
-    ndwi = image.normalizedDifference(['Green', 'NIR']).rename('NDWI')
+    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
     ndpi = image.expression("(NIR - ((0.56 * RED) + (0.44 * SWIR_2))) / (NIR + ((0.56 * RED) + (0.44 * SWIR_2)))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'SWIR_2': image.select('SWIR_2')}).rename('NDPI')
     
-    return image.addBands([ndvi, ndmi, ndwi, evi, savi, bsi, ndpi])
+    return image.addBands([ndvi, ndwi, evi, savi, bsi, ndpi])
 
 
 def maskCloud(image):
@@ -189,9 +188,12 @@ shallow_perc_sand_11 = ee.ImageCollection(perc_sand_11.toList(3)).mean()
 deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 
 # create empty dataframe to save extracted values into
-data[['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDMI_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June',
-      'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept',
-      'NDMI_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept',  'SWIR_2_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 'dNDMI', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'AET', 'Annual_Precipitation', 'SWE', 'SRad', 'Minimum_temperature', 'Maximum_temperature', 'Active_growth_days', 'Elevation','Slope','Shallow_Clay','Shallow_Sand', 'Shallow_Hydra_Conduc', 'Deep_Clay', 'Deep_Sand', 'Deep_Hydra_Conduc', 'Lithology']] = None
+data[['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June',             
+      'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 
+      'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept',  'SWIR_2_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 
+      'dNDMI', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'AET', 'Annual_Precipitation', 
+      'SWE', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Active_growth_days', 'Elevation', 'Slope', 'Shallow_Clay','Shallow_Sand', 'Shallow_Hydra_Conduc', 'Deep_Clay', 'Deep_Sand', 'Deep_Hydra_Conduc', 'Lithology']] = None
+cols = list(data.columns)
 
 # populate bands by applying above functions for each pixel in dataframe
 def bandsRun(idx):
@@ -218,7 +220,8 @@ def bandsRun(idx):
         # compute values from daymetv4 (1km resolution), also gridmet and terraclimate (resolution are both 4,638.3m)
         if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
             terra_values = terraclimate_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
-            grid_values = gridmet_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
+            grid_values = gridmet_11.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
+            srad = grid_values.filter(ee.Filter.calendarRange(6, 8, 'month')).sum()
             elev = dem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
             slope_value = slopeDem_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
             shallow_clay = shallow_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -230,7 +233,8 @@ def bandsRun(idx):
             lith = lithology_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         else:
             terra_values = terraclimate.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
-            grid_values = gridmet.filterBounds(point).filterDate(prev_5_year, year+"-12-31").mean()
+            grid_values = gridmet.filterBounds(point).filterDate(prev_5_year, year+"-12-31")
+            srad = grid_values.filter(ee.Filter.calendarRange(6, 8, 'month')).sum()
             elev = dem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['elevation']
             slope_value = slopeDem.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['slope']
             shallow_clay = shallow_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -243,10 +247,11 @@ def bandsRun(idx):
         
         snow_we = terra_values.filter(ee.Filter.calendarRange(4, 4, 'month')).mean()
         swe_value = snow_we.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['swe']
-        avg_terra_values = terra_values.mean().reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
-        avg_grid_values = grid_values.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+        total_terra_values = terra_values.sum().reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+        avg_grid_values = grid_values.mean().reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30).getInfo()
+        rad = srad.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['srad']/5
         if idx%50 == 0: print(idx, end=' ')
-        return list(bands_June.values()) + list(bands_Sept.values()) + list(integrals) + list(avg_terra_values.values())[:2] + [swe_value] + list(avg_grid_values.values()) + [growth_days, elev, slope_value, shallow_clay, shallow_sand, shallow_hydra, deep_clay, deep_sand, deep_hydra, lith] 
+        return list(bands_June.values()) + list(bands_Sept.values()) + list(integrals) + [x/5 for x in list(total_terra_values.values())[:2]] + [swe_value] + list(avg_grid_values.values())[1:] + [rad, growth_days, elev, slope_value, shallow_clay, shallow_sand, shallow_hydra, deep_clay, deep_sand, deep_hydra, lith] 
     except:
         print(idx)
         return [None]*55
@@ -254,7 +259,6 @@ def bandsRun(idx):
 # use paralle code to extract values to dataframe (GEE limit of 40 concurrent requests: 15 threads chosen)
 with Parallel(n_jobs=15, prefer="threads") as parallel:
     result = parallel(delayed(bandsRun)(meadowIdx) for meadowIdx in range(data.shape[0]))
-cols = list(data.columns)
 for idx in range(len(result)):
     data.loc[idx, cols[10:]] = result[idx]
 
@@ -287,7 +291,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDVI_June', 'NDVI_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2']]
+var_col = [c for c in cols[10:-1] if c not in ['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -352,7 +356,7 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-soilc_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=3, n_estimators=50, subsample=0.4,
+soilc_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=125, subsample=0.3,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -412,8 +416,8 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(soilc_model.feature_names_in_)[sorted_idx])
+    plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
+    plt.yticks(pos, np.array(soilc_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotTestY(var):
@@ -444,7 +448,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept', 'NDVI_June', 'NDVI_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2']]
+var_col = [c for c in cols[10:-1] if c not in ['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -508,7 +512,7 @@ train_data['percentCarbon'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-percentc_model = GradientBoostingRegressor(learning_rate=0.13, max_depth=11, n_estimators=25, subsample=0.6,
+percentc_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=13, n_estimators=25, subsample=0.5,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -568,8 +572,8 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(percentc_model.feature_names_in_)[sorted_idx])
+    plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
+    plt.yticks(pos, np.array(percentc_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 plotFeatureImportance()

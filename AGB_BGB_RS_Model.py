@@ -209,8 +209,8 @@ shallow_organic_m_11 = ee.ImageCollection(organic_m_11.toList(3)).mean()
 
 dBlue, dGreen, dRed, dNIR, dSWIR_1, dSWIR_2 = [], [], [], [], [], []
 dNDVI, dNDWI, dEVI, dSAVI, dBSI, dNDPI, dNDSI, dNDGI = [], [], [], [], [], [], [], []
-NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer, NDGI_Summer = [], [], [], [], [], []
-NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall, NDGI_Fall = [], [], [], [], [], []
+NDVI_Summer, NDWI_Summer, EVI_Summer, SAVI_Summer, BSI_Summer, NDPI_Summer, NDGI_Summer = [], [], [], [], [], []
+NDVI_Fall, NDWI_Fall, EVI_Fall, SAVI_Fall, BSI_Fall, NDPI_Fall, NDGI_Fall = [], [], [], [], [], []
 flow, slope, elevation, wet, snowy, S_Rad, AGD, modisNPP, landsatNPP, = [], [], [], [], [], [], [], [], []
 mean_annual_pr, swe, et, cdef, min_temp, max_temp, Organic_Matter = [], [], [], [], [], [], []
 Shallow_Clay, Shallow_Hydra, Shallow_Sand, Lithology, Deep_Clay, Deep_Hydra, Deep_Sand = [], [], [], [], [], [], []
@@ -284,12 +284,14 @@ for idx in range(data.shape[0]):
     tmin = temps['tmmn']
     tmax = temps['tmmx']
     
+    NDVI_Summer.append(bands_June['NDVI'])
     NDWI_Summer.append(bands_June['NDWI'])
     EVI_Summer.append(bands_June['EVI'])
     SAVI_Summer.append(bands_June['SAVI'])
     BSI_Summer.append(bands_June['BSI'])
     NDPI_Summer.append(bands_June['NDPI'])
     NDGI_Summer.append(bands_June['NDGI'])
+    NDVI_Fall.append(bands_Sept['NDVI'])
     NDWI_Fall.append(bands_Sept['NDWI'])
     EVI_Fall.append(bands_Sept['EVI'])
     SAVI_Fall.append(bands_Sept['SAVI'])
@@ -342,12 +344,14 @@ for idx in range(data.shape[0]):
 # checks if they are all cloud free (should equal data.shape[0])
 len([x for x in dNIR if x])
 
+data['NDVI_June'] = NDVI_Summer
 data['NDWI_June'] = NDWI_Summer
 data['EVI_June'] = EVI_Summer
 data['SAVI_June'] = SAVI_Summer
 data['BSI_June'] = BSI_Summer
 data['NDPI_June'] = NDPI_Summer
 data['NDGI_June'] = NDGI_Summer
+data['NDVI_Sept'] = NDVI_Fall
 data['NDWI_Sept'] = NDWI_Fall
 data['EVI_Sept'] = EVI_Fall
 data['SAVI_Sept'] = SAVI_Fall
@@ -579,8 +583,8 @@ df = pd.DataFrame({"Variable":  np.array(bgb_model.feature_names_in_)[sorted_idx
 df.to_csv("files/BGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx])
+    plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
+    plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotTestY(var):
@@ -774,8 +778,8 @@ df = pd.DataFrame({"Variable":  np.array(agb_model.feature_names_in_)[sorted_idx
 df.to_csv("files/AGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
-    plt.barh(pos, feat_imp[sorted_idx], align="center")
-    plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx])
+    plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
+    plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 plotFeatureImportance()

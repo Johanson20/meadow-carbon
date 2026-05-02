@@ -306,7 +306,7 @@ def predictSoilandPercentCarbon(years):
             print(attribute, "done!")
 
 # predictSoilandPercentCarbon(list(range(1990, 2025, 5)) + [2024])
-# predictSoilandPercentCarbon([2020])
+# predictSoilandPercentCarbon([2024])
 
 
 def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
