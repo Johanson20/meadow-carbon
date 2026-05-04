@@ -291,7 +291,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
 y_field = 'SoilC.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -356,7 +356,7 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-soilc_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=125, subsample=0.3,
+soilc_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=9, n_estimators=25, subsample=0.6,
                 validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
 soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
@@ -448,7 +448,7 @@ data.drop_duplicates(inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in cols[10:-1] if c not in ['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June', 'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
+var_col = [c for c in cols[10:-1] if c not in ['Blue_June', 'Green_June', 'NIR_June', 'Red_June', 'SWIR_1_June', 'SWIR_2_June', 'Blue_Sept', 'Green_Sept', 'NIR_Sept', 'Red_Sept', 'SWIR_1_Sept', 'SWIR_2_Sept']]
 y_field = 'percentC'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -581,5 +581,5 @@ plotTestY("Percentage Carbon")
 np.array(percentc_model.feature_names_in_)[sorted_idx]
 np.array(percentc_model.feature_importances_)[sorted_idx]
 
-with open('csv/bgb_soil_models.pckl', 'wb') as f:
+with open('files/bgb_soil_models.pckl', 'wb') as f:
     pickle.dump([percentc_model, soilc_model], f)

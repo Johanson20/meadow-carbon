@@ -643,7 +643,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in list(cols[19:-9]) if c not in ['dNDSI', 'Snow_days', 'Cdef', 'Flow', 'Minimum_temperature', 'Maximum_temperature']]  # for the 5-year averaged data
+var_col =  [c for c in list(cols[21:-8]) if c not in ['dNDSI', 'Snow_days', 'Cdef', 'Flow', 'Minimum_temperature', 'Maximum_temperature']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -789,7 +789,7 @@ np.array(agb_model.feature_names_in_)[sorted_idx]
 np.array(agb_model.feature_importances_)[sorted_idx]
 
 
-with open('csv/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
+with open('files/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
-with open('csv/carbon_sd_models.pckl', 'wb') as f:
+with open('files/carbon_sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)

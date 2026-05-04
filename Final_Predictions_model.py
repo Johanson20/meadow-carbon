@@ -438,9 +438,9 @@ def resample11(image):
 
 
 #load ML GBM and SD models
-with open('csv/carbon_models.pckl', 'rb') as f:
+with open('files/carbon_models.pckl', 'rb') as f:
     ghg_model, agb_model, bgb_model = pickle.load(f)
-with  open('csv/carbon_sd_models.pckl', 'rb') as f:
+with  open('files/carbon_sd_models.pckl', 'rb') as f:
     ghg_84_model, agb_84_model, bgb_84_model = pickle.load(f)
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
 ghg_sd_col, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(agb_84_model.feature_names_in_), list(bgb_84_model.feature_names_in_)
