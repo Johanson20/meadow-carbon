@@ -12,7 +12,7 @@ import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
-import multiprocessing
+from joblib import Parallel, delayed
 import contextlib
 import rasterio
 import rioxarray as xr
@@ -132,9 +132,8 @@ def calculateIndices(image):
 
 def loadYearCollection(year):
     # load GEE data for the relevant year and make folders for each year
-    global date_range, start_year, end_year, landsat_5_year, landsat_collection
+    global start_year, end_year, landsat_5_year, landsat_collection
     start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
-    date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
     landsat_collection = landsat.filterDate(start_year, end_year)
     os.makedirs(f"files/{year}", exist_ok=True)
     os.makedirs(f"files/NDVIs/{year}", exist_ok=True)
@@ -150,12 +149,7 @@ def downloadImageBands(subregion, imagename, feature, combined_image):
             if not os.path.exists(image_name):
                 time.sleep(1.1)
                 with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
-                    geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)      
-    if not os.path.exists(image_name):    # use g-drive download if conventional one fails
-        try:
-            geemap.ee_export_image_to_drive(combined_image.clip(subregion), description=image_name[17:-4], folder="files", crs=mycrs, region=subregion, scale=30, maxPixels=1e13)
-        except:
-            pass
+                    geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
     return 1
 
 
@@ -164,7 +158,6 @@ def generateCombinedImage(shapefile_bbox):
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
     landsat_June = landsat_5_year.select('NDVI').filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
     landsat_Sept = landsat_5_year.select('NDVI').filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
-    combined_image = None
     combined_image = landsat_June.addBands(landsat_Sept)
     return combined_image
 
@@ -203,10 +196,6 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 cols = ['NDVI_June', 'NDVI_Sept', 'X', 'Y']
 G_driveAccess()
 allIds = shapefile.ID
-
-# re-run this part for each unique year
-year = 2021
-loadYearCollection(year)
 
 
 def prepareMeadows(meadowId):
@@ -257,25 +246,21 @@ def processMeadow(meadowCues):
     except:
         print(f"Meadow {meadowId} threw an exception!")
         return -4
-
 '''
 meadowId = 15508   # 16973 (largest), 16247 (smallest)
 isValidBand = prepareMeadows(meadowId)
 processMeadow((meadowId, isValidBand))
 '''
 
-if __name__ == "__main__":
-    years = range(1984, 2025)
-    # run the first prepareMeadows for 5 years at a time (due to GEE limit) and display progress per year
-    for year in years[-6:-1]:   # modify the indexes
-        start = datetime.now()
-        loadYearCollection(year)
-        with multiprocessing.Pool(processes=60, maxtasksperchild=50) as pool:
-            bandresult = pool.map(prepareMeadows, allIds)
-        with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
-            pickle.dump(bandresult, f)
-        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
-    
+for year in range(1985, 2025):
+    start = datetime.now()
+    loadYearCollection(year)
+    with Parallel(n_jobs=18, prefer="threads") as parallel:
+        bandresult = parallel(delayed(prepareMeadows)(meadowId) for meadowId in allIds)
+    with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
+        pickle.dump(bandresult, f)
+    print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
+'''    
     # run the processMeadows for 5 years at a time
     for year in years[-6:-1]:   # modify the indexes
         start = datetime.now()
@@ -287,4 +272,4 @@ if __name__ == "__main__":
             result = pool.map(processMeadow, meadowData)
         with open(f'files/{year}/NDVI_finalresult.pckl', 'wb') as f:
             pickle.dump(result, f)
-        print(f"Year {year} completed in {datetime.now() - start}")
+        print(f"Year {year} completed in {datetime.now() - start}")'''
