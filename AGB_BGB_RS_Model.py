@@ -433,7 +433,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature']]
+var_col = [c for c in list(cols[10:]) if c not in ['NDVI_June', 'NDPI_June', 'EVI_June', 'NDGI_June', 'NDVI_Sept', 'NDPI_Sept', 'EVI_Sept', 'NDGI_Sept', 'dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -506,8 +506,8 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2,
-                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
+bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.7, validation_fraction=0.2,
+                                      n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
@@ -517,8 +517,8 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimato
 # soil carbon with separated depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2,
                                       n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
-bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.05, max_depth=14, n_estimators=200,
-                                         subsample=0.4, validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
+bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.1, max_depth=6, n_estimators=75,
+                                         subsample=0.7, validation_fraction=0.2, n_iter_no_change=10, max_features='log2',
                                          verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
@@ -548,7 +548,7 @@ with PdfPages('files/BGB_1_1_plot.pdf') as pdf:
     ax.legend()
     pdf.savefig(fig)
     plt.close(fig)
-len(bgb_model.estimators_)  # number of trees used in estimation
+bgb_model.n_estimators  # number of iterations used in estimation
 
 # print relevant stats
 y_train_pred = bgb_model.predict(X_train)
@@ -643,7 +643,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()   # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col =  [c for c in list(cols[21:-8]) if c not in ['dNDSI', 'Snow_days', 'Cdef', 'Flow', 'Minimum_temperature', 'Maximum_temperature']]  # for the 5-year averaged data
+var_col =  [c for c in list(cols[21:-8]) if c not in ['dNDSI', 'Snow_days', 'Cdef', 'Flow']]  # for the 5-year averaged data
 # var_col =  list(cols[15:24]) + list(cols[-13:])
 y_field = 'HerbBio.g.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
@@ -710,10 +710,10 @@ train_data['AGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2,
-                                      n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-agb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.25, max_depth=13, 
-                                      n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=50,  
+agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=10, n_estimators=50, subsample=0.8, validation_fraction=0.2,
+                                      n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
+agb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.25, max_depth=10, 
+                                      n_estimators=50, subsample=0.8, validation_fraction=0.2, n_iter_no_change=10,  
                                       max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
@@ -743,7 +743,7 @@ with PdfPages('files/AGB_1_1_plot.pdf') as pdf:
     ax.legend()
     pdf.savefig(fig)
     plt.close(fig)
-len(agb_model.estimators_)  # number of trees used in estimation
+agb_model.n_estimators  # number of iterations used in estimation
 
 # print relevant stats
 y_train_pred = agb_model.predict(X_train)
