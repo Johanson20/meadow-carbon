@@ -49,7 +49,7 @@ def calculateIndices(image):
     
     # add indices
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
-    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
+    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
     savi = image.expression("1.5 * ((NIR - RED) / (NIR + RED + 0.5))", {'NIR': image.select('NIR'), 'RED': image.select('Red')}).rename('SAVI')
     bsi = image.expression("((RED + SWIR_1) - (NIR + BLUE)) / (RED + SWIR_1 + NIR + BLUE)", {'RED': image.select('Red'), 'SWIR_1': image.select('SWIR_1'), 'NIR': image.select('NIR'), 'BLUE': image.select('Blue')}).rename('BSI')
@@ -191,7 +191,7 @@ deep_perc_sand_11 = ee.Image(perc_sand_11.toList(6).get(3))
 data[['BSI_June', 'Blue_June', 'EVI_June', 'Green_June', 'NDPI_June', 'NDVI_June', 'NDWI_June', 'NIR_June', 'Red_June',             
       'SAVI_June', 'SWIR_1_June', 'SWIR_2_June', 'BSI_Sept', 'Blue_Sept', 'EVI_Sept', 'Green_Sept', 'NDPI_Sept', 'NDVI_Sept', 
       'NDWI_Sept', 'NIR_Sept', 'Red_Sept', 'SAVI_Sept', 'SWIR_1_Sept',  'SWIR_2_Sept', 'dBSI', 'dBlue', 'dEVI', 'dGreen', 
-      'dNDMI', 'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'AET', 'Annual_Precipitation', 
+       'dNDPI', 'dNDVI', 'dNDWI', 'dNIR', 'dRed', 'dSAVI', 'dSWIR_1', 'dSWIR_2', 'AET', 'Annual_Precipitation', 
       'SWE', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Active_growth_days', 'Elevation', 'Slope', 'Shallow_Clay','Shallow_Sand', 'Shallow_Hydra_Conduc', 'Deep_Clay', 'Deep_Sand', 'Deep_Hydra_Conduc', 'Lithology']] = None
 cols = list(data.columns)
 

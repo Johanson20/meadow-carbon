@@ -21,8 +21,8 @@ ee.Initialize()
 def calculateIndices(image):
     # calculate and add indices from landsat band values
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
-    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
-    return image.addBands([ndvi, ndwi])
+    ndmi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
+    return image.addBands([ndvi, ndmi])
 
 
 def maskCloudAndRename(image):
@@ -69,7 +69,7 @@ slopeDem_11 = ee.Terrain.slope(dem_11)
 
 # initialize dataframe with relevant variables
 meadow_data = pd.DataFrame(columns=['ID', 'Area_m2', 'Longitude', 'Latitude', 'BLue_mean', 'Blue_var', 'Green_mean', 'Green_var',
-                           'NDVI_mean', 'NDVI_var', 'NDWI_mean', 'NDWI_var', 'NIR_mean', 'NIR_var', 'Red_mean', 'Red_var',
+                           'NDVI_mean', 'NDVI_var', 'NDMI_mean', 'NDMI_var', 'NIR_mean', 'NIR_var', 'Red_mean', 'Red_var',
                            'SWIR_1_mean', 'SWIR_1_var', 'SWIR_2_mean', 'SWIR_2_var', 'TPI', 'Flow', 'Slope', 'IsMeadow'])
 
 # iterate through each meadow: extract centroid's values and random non-meadow point

@@ -420,3 +420,44 @@ plt.plot(range(df.shape[0]), df['NEP_Mean_Aft_Fire'], color='red', label="Mean_N
 plt.ylabel("Mean_NEP")
 plt.title(f"NEP Comparison Before and After Fire")
 plt.legend()
+
+# code to regenerate NEP predictions when any carbon model is changed
+epsg_crs = "EPSG:4326"
+shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
+res = 30
+inputdir = "files/2016"
+all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
+
+ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
+all_data = pd.DataFrame(columns=['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP'])
+for idx in range(len(all_files)):
+    file = all_files[idx]
+    zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
+    df = pd.read_csv(file)
+    df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
+    df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
+    df.loc[df['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+    df.loc[df['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+    df['Root_Turnover'] = (df['Roots.kg.m2']*0.49 - ((df['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
+    df['Root_Exudates'] = df['Roots.kg.m2']*1000*df['Active_growth_days']*12*1.04e-4
+    df['BNPP'] = df['Root_Turnover'] + df['Root_Exudates']
+    df['ANPP'] = df['HerbBio.g.m2']*0.433
+    df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
+    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+    df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
+    all_data = pd.concat([all_data, df.loc[:, ['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP']]])
+    if idx%1000 == 0: print(idx, end=" ")
+
+all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
+utm_lons, utm_lats = all_data['X'], all_data['Y']
+for variable in ["ANPP", "BNPP", "NEP"]:
+    outfile = f"files/results/2024_{variable}_4.tif"
+    pixel_values = all_data[variable]
+    gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
+    out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
+    out_grd = out_grd.rio.reproject(epsg_crs)
+    out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
+    out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
+    print(variable)

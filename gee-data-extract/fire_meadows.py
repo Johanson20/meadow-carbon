@@ -104,8 +104,7 @@ landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(
 meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID', 'FireID', 'Fire_Date', 'Description',
             'Image_Date', 'Image_Time', 'Days_Difference', 'No_Pixels', 'NDWI_0_total', 'NDWI_0_fraction', 'NDWI_03_total',
             'NDWI_03_fraction', 'BSI_mean', 'BSI_median', 'BSI_std', 'EVI_mean','EVI_median', 'EVI_std', 'NDMI_mean',
-            'NDMI_median', 'NDMI_std', 'SAVI_mean',
-            'SAVI_median', 'SAVI_std'])
+            'NDMI_median', 'NDMI_std', 'SAVI_mean', 'SAVI_median', 'SAVI_std'])
 
 # extract Landsat values
 def calcVariables(meadowIdx):

@@ -246,7 +246,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
         out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
         out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
 
-# mergeToSingleFile("files/2021", "files/results/2021_Meadows.csv", "['Annual_Precipitation', 'AET', 'Active_growth_days', 'Elevation', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh'].csv")
+# mergeToSingleFile("files/2021", "files/results/2021_Meadows.csv", "['Annual_Precipitation', 'AET', 'Active_growth_days', 'Elevation', 'Minimum_temperature', 'Maximum_temperature', 'SWE', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh'].csv")
 # mergeToSingleFile("files/2023", "files/results/merged_BNPP.csv", "NEP.csv")
 # mergeToSingleFile("files/2019NEP", "files/results/NEP_2019_Zone10.tif", "NEP.tif")
 # mergeToSingleFile("files/2019NEP", "files/results/NEP_2019_Zone10.tif", "NEP.tif", False)

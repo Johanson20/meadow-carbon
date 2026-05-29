@@ -340,8 +340,8 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
         lith = lithology.clip(shapefile_bbox)
     # filter for summer and fall and calculate indices
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
-    landsat_June = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
-    landsat_Sept = landsat_5_year.select(['NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
+    landsat_June = landsat_5_year.select(['NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
+    landsat_Sept = landsat_5_year.select(['NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI']).filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
     combined_image, residue_image = None, None
     noBands, bandnames1, threshold = allBands, 0, np.ceil((1024 - allBands)/recurringBands)
     noImages = len(dates)
@@ -509,7 +509,7 @@ lithology = ee.Image("CSP/ERGo/1_0/US/lithology").select("b1").resample("bilinea
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx', 'srad'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 snow_we = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select('swe')
-cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'Lithology', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI', 'NDSI']
+cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'Annual_Precipitation', 'AET', 'Elevation', 'Slope', 'SWE', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'Lithology', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDGI', 'NDSI']
 recurringBands, allBands = len(cols[:12]), len(cols[:-10])
 G_driveAccess()
 allIds = shapefile.ID
