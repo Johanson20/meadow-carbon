@@ -12,7 +12,8 @@ import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
-from joblib import Parallel, delayed
+# from joblib import Parallel, delayed
+import multiprocessing
 import contextlib
 import rasterio
 import rioxarray as xr
@@ -20,30 +21,12 @@ import ee
 import geemap
 from datetime import datetime
 from shapely.geometry import box
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"
 ee.Initialize()
-
-
-def G_driveAccess():
-    global drive
-    # Authenticate and create the PyDrive client for google drive access
-    gauth = GoogleAuth()
-    gauth.LoadCredentialsFile("mycreds.txt")
-    if gauth.credentials is None:   # Authenticate if there are no valid credentials
-        gauth.LocalWebserverAuth()     # Creates local webserver and auto handles authentication (only do it once).
-    elif gauth.access_token_expired:    # Refresh the credentials if they are expired
-        gauth.Refresh()
-    else:   # Load the existing credentials
-        gauth.Authorize()
-    # Save the credentials for the next run
-    gauth.SaveCredentialsFile("mycreds.txt")
-    drive = GoogleDrive(gauth)
 
 
 def geotiffToDataFrame(image_name, cols):
@@ -100,16 +83,6 @@ def interpolate_group(group):
         return pd.DataFrame()
 
 
-def makePredictions(df):
-    # select relevant columns, predict GHG and interpolate daily values
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df.dropna(inplace=True)
-    df.drop_duplicates(inplace=True)
-    df.reset_index(drop=True, inplace=True)
-    df = df.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
-    return df
-    
-
 def maskAndRename(image):
     # rename bands and mask out cloud based on bits in QA_pixel; then scale values
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
@@ -150,7 +123,7 @@ def downloadImageBands(subregion, imagename, feature, combined_image):
                 time.sleep(1.1)
                 with contextlib.redirect_stdout(None):  # suppress output of downloaded images 
                     geemap.ee_export_image(combined_image.clip(subregion), filename=image_name, scale=30, crs=mycrs, region=subregion)
-    return 1
+    return feature.ID
 
 
 def generateCombinedImage(shapefile_bbox):
@@ -194,7 +167,6 @@ landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2'
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
 cols = ['NDVI_June', 'NDVI_Sept', 'X', 'Y']
-G_driveAccess()
 allIds = shapefile.ID
 
 
@@ -234,7 +206,11 @@ def processMeadow(meadowCues):
         df = processGeotiff(df)
         
         if not df.empty:
-            all_data = makePredictions(df)
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
+            df.dropna(inplace=True)
+            df.drop_duplicates(inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            all_data = df.groupby(['X', 'Y']).apply(interpolate_group).reset_index(drop=True)
             data = pd.read_csv(f'{outputname}.csv')
             all_data = pd.merge(data, all_data, on=['X', 'Y'])
             all_data.to_csv(f'{outputname}.csv', index=False)
@@ -252,7 +228,18 @@ isValidBand = prepareMeadows(meadowId)
 processMeadow((meadowId, isValidBand))
 '''
 
-for year in range(1985, 2025):
+if __name__ == "__main__":
+    years = range(1986, 2025)
+    for year in years:   # modify the indexes
+        start = datetime.now()
+        loadYearCollection(year)
+        with multiprocessing.Pool(processes=60, maxtasksperchild=50) as pool:
+            bandresult = pool.map(prepareMeadows, allIds)
+        with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
+            pickle.dump(bandresult, f)
+        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
+
+'''for year in range(1985, 2025):
     start = datetime.now()
     loadYearCollection(year)
     with Parallel(n_jobs=18, prefer="threads") as parallel:
@@ -260,9 +247,9 @@ for year in range(1985, 2025):
     with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
         pickle.dump(bandresult, f)
     print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
-'''    
+    
     # run the processMeadows for 5 years at a time
-    for year in years[-6:-1]:   # modify the indexes
+    for year in years:   # modify the indexes
         start = datetime.now()
         loadYearCollection(year)
         with open(f'files/{year}/NDVI_bandresult.pckl', 'rb') as f:

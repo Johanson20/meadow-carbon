@@ -65,7 +65,7 @@ tmax_diff1, tmin_diff1 = minMaxTempImages('2041-01-01', '2071-01-01', 'SSP5-8.5'
 
 # read in shapefile and bounding geometry
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/StudyExtent_20260205.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("files/StudyExtent_20260331.shp").to_crs(epsg_crs)
 shapefile_bbox = ee.Geometry.Polygon(list(shapefile.iloc[0].geometry.exterior.coords))
 
 # download all geotiffs of differences in 30-year averaged values
