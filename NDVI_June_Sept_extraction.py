@@ -8,17 +8,15 @@ Created on Mon Apr 22 11:03:25 2024
 import os
 import time
 import numpy as np
-import pickle
 import warnings
 import pandas as pd
 import geopandas as gpd
-# from joblib import Parallel, delayed
-import multiprocessing
 import contextlib
 import rasterio
 import rioxarray as xr
 import ee
 import geemap
+from joblib import Parallel, delayed
 from datetime import datetime
 from shapely.geometry import box
 
@@ -189,20 +187,17 @@ def prepareMeadows(meadowId):
         return -4
 
 
-def processMeadow(meadowCues):
+def processMeadow(meadowId):
     try:
-        meadowId, isValidBand = meadowCues
-        if isValidBand <= 0:
-            return -1   # if no GEE data is available for the meadow's buffer
         # check if results already exist
         outputname = f'files/{year}/meadow_{year}_{meadowId}'
-        # dataframe to store results for each meadow
-        inputname = f'files/NDVIs/{year}/meadow_{year}_{meadowId}'
-        image_name = f'{inputname}.tif'
+        image_name = f'files/NDVIs/{year}/meadow_{year}_{meadowId}.tif'
+        if not os.path.exists(image_name):
+            return -1
         try:
             df = geotiffToDataFrame(image_name, cols)
         except:
-            pass
+            return -2
         df = processGeotiff(df)
         
         if not df.empty:
@@ -220,43 +215,26 @@ def processMeadow(meadowCues):
         
         return meadowId
     except:
-        print(f"Meadow {meadowId} threw an exception!")
         return -4
 '''
 meadowId = 15508   # 16973 (largest), 16247 (smallest)
-isValidBand = prepareMeadows(meadowId)
-processMeadow((meadowId, isValidBand))
+prepareMeadows(meadowId)
+processMeadow((meadowId)
 '''
 
-if __name__ == "__main__":
-    years = range(1986, 2025)
-    for year in years:   # modify the indexes
-        start = datetime.now()
-        loadYearCollection(year)
-        with multiprocessing.Pool(processes=60, maxtasksperchild=50) as pool:
-            bandresult = pool.map(prepareMeadows, allIds)
-        with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
-            pickle.dump(bandresult, f)
-        print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
-
-'''for year in range(1985, 2025):
+years = range(1985, 2025)
+# run the first phase of geotiff downloads for NDVIs
+for year in years:
     start = datetime.now()
     loadYearCollection(year)
-    with Parallel(n_jobs=18, prefer="threads") as parallel:
+    with Parallel(n_jobs=60, prefer="threads") as parallel:
         bandresult = parallel(delayed(prepareMeadows)(meadowId) for meadowId in allIds)
-    with open(f'files/{year}/NDVI_bandresult.pckl', 'wb') as f:
-        pickle.dump(bandresult, f)
     print(f"Pre-processing of tasks for {year} completed in {datetime.now() - start}")
-    
-    # run the processMeadows for 5 years at a time
-    for year in years:   # modify the indexes
-        start = datetime.now()
-        loadYearCollection(year)
-        with open(f'files/{year}/NDVI_bandresult.pckl', 'rb') as f:
-            bandresult = pickle.load(f)
-        meadowData = list(zip(allIds, bandresult))
-        with multiprocessing.Pool(processes=60, maxtasksperchild=1) as pool:
-            result = pool.map(processMeadow, meadowData)
-        with open(f'files/{year}/NDVI_finalresult.pckl', 'wb') as f:
-            pickle.dump(result, f)
-        print(f"Year {year} completed in {datetime.now() - start}")'''
+   
+# run the processing of NDVIs and appending to original dataframes
+for year in years:
+    start = datetime.now()
+    loadYearCollection(year)
+    with Parallel(n_jobs=60, prefer="threads") as parallel:
+        bandresult = parallel(delayed(processMeadow)(meadowId) for meadowId in allIds)
+    print(f"Year {year} completed in {datetime.now() - start}")
