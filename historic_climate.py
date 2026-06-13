@@ -9,8 +9,12 @@ import os
 import ee
 import warnings
 import geopandas as gpd
+import rasterio
+import rioxarray as xr
 import contextlib
 import geemap
+from shapely.geometry import Point
+from geocube.api.core import make_geocube
 
 mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
 os.chdir(mydir)
@@ -78,3 +82,34 @@ with contextlib.redirect_stdout(None):  # suppress output of downloaded images
             imagename = f'files/{myvar[:-1]}_SSP5-8.5.tif'
         else: continue
         geemap.ee_export_image(globals()[myvar].clip(shapefile_bbox), filename=imagename, scale=1000, crs=epsg_crs, region=shapefile_bbox)
+
+
+# function to read single band image
+def readBand(image_name):
+    with rasterio.Env(CPL_LOG='ERROR'):
+        geotiff = xr.open_rasterio(image_name)
+    df = geotiff.to_dataframe(name='value').reset_index()
+    df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
+    geotiff.close()
+    return df
+
+image1 = "files/SWE_data/swe_30y_ens32max_historical_1961-1990_1961-04-01.tif"
+image2 = "files/SWE_data/swe_30y_ens32max_rcp45_2070-2099_2070-04-01.tif"
+image3 = "files/SWE_data/swe_30y_ens32max_rcp45_2035-2064_2035-04-01.tif"
+
+df1 = readBand(image1)
+df2 = readBand(image2)
+df = df1.drop(1, axis=1).copy()
+df['abs_diff'] = df2[1] - df1[1]
+df['perc_diff'] = ((df2[1] - df1[1])/df1[1])*100
+
+geometry = [Point(xy) for xy in zip(df['x'], df['y'])]
+gdf = gpd.GeoDataFrame(df, geometry=geometry)
+gdf.set_crs(epsg_crs, inplace=True)
+gdf = gpd.sjoin(gdf, shapefile, predicate='within', how='inner').drop(['x', 'y', 'index_right', 'FID'], axis=1)
+gdf.to_crs(32611, inplace=True)
+for col in gdf.columns[:-1]:
+    out_grd = make_geocube(vector_data=gdf, measurements=[col], resolution=(-1000, 1000))
+    out_grd = out_grd.rio.reproject(epsg_crs)
+    out_grd.rio.to_raster(f'files/SWE_{col}_lateCentury.tif')
+    # out_grd.rio.to_raster(f'files/SWE_{col}_midCentury.tif')     # if image3 is used instead of image2

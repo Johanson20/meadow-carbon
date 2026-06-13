@@ -187,7 +187,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
                 stats_df.loc[len(stats_df)] = [file.split("_")[2], stats[0]] + list(stats[1:4]) + [stats[-1]]
                 gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
                 df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
-                all_data = pd.concat([all_data, df])
+                all_data = pd.concat([all_data, df], ignore_index=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
         # write to a vrt file
         vrt_path = f'{inputdir}/{variable}.vrt'
@@ -225,7 +225,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             df[['ID', 'Jepson_Region']] = meadowId, jepson
             df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
-            all_data = pd.concat([all_data, df])
+            all_data = pd.concat([all_data, df], ignore_index=True)
         if "," in variable:
             stats_df.drop(stats_df.columns[-18:-2], axis=1, inplace=True)
         stats_df.to_csv(outfile.split(".")[0] + "_stats.csv", index=False)
@@ -281,7 +281,7 @@ def predictSoilandPercentCarbon(years):
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             df = df[mycols]
-            all_data = pd.concat([all_data, df])
+            all_data = pd.concat([all_data, df], ignore_index=True)
         all_data = all_data.dropna().reset_index(drop=True)
         all_data = all_data[mycols]
         gdf = pd.read_csv(outfile)

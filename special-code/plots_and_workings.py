@@ -27,7 +27,7 @@ for year in range(1984, 2025):
     tifs = glob.glob(f"files/results/{year}*.tif")
     for tif in tifs:
         asset_id = asset + tif[14:-4]
-        ee.data.setAssetAcl(asset_id, acl_update)
+        ee.data.setAssetIamPolicy(asset_id, acl_update)
     print(year, end=' ')
 
 # get max 98th percentile value for each attribute for GEE app
@@ -427,10 +427,11 @@ shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 res = 30
-inputdir = "files/2016"
+inputdir = "files/2024"
 all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
 
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
+df_parts = []
 all_data = pd.DataFrame(columns=['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP'])
 for idx in range(len(all_files)):
     file = all_files[idx]
@@ -447,9 +448,10 @@ for idx in range(len(all_files)):
     df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
     gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
     df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
-    all_data = pd.concat([all_data, df.loc[:, ['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP']]])
+    df_parts.append(df[['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP']])
     if idx%1000 == 0: print(idx, end=" ")
 
+all_data = pd.concat(df_parts, ignore_index=True)
 all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
 utm_lons, utm_lats = all_data['X'], all_data['Y']
 for variable in ["ANPP", "BNPP", "NEP"]:

@@ -483,7 +483,7 @@ def processMeadow(meadowCues):
             except:
                 continue
             df = processGeotiff(df)
-            all_data = pd.concat([all_data, df])
+            all_data = pd.concat([all_data, df], ignore_index=True)
             df = pd.DataFrame()
         all_data.head()
         

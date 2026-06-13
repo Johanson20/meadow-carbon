@@ -117,7 +117,7 @@ def extractActiveGrowth(landsat, target_date):
     date_range = pd.date_range(start=prev_5_year, end=target_date, freq='D')[:-1]
     df_daily = df_daily.reindex(date_range).interpolate(method='linear').ffill().bfill()
     df_daily.dropna(inplace=True)
-    df_5_years = pd.concat([df_daily, df_grid], axis=1)
+    df_5_years = pd.concat([df_daily, df_grid], axis=1, ignore_index=True)
     
     # Active growing season is also when NDVI >= 0.2 without snow or water coverage, at above zero temperature
     df_5_years['NDSI'] = (df_5_years['Green'] - df_5_years['SWIR_1'])/(df_5_years['Green'] + df_5_years['SWIR_1'])
