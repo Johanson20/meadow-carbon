@@ -15,10 +15,10 @@ from matplotlib.colors import ListedColormap
 
 ee.Initialize()
 
-# delete assets for a particular year
-all_assets = ee.data.listAssets({"parent": "projects/ee-jonyegbula/assets"})["assets"]
-assets_2007 = [a['name'] for a in all_assets if '2024' in a['name']]
-for asset in assets_2007: ee.data.deleteAsset(asset)
+# delete assets for a particular year (dangerous code)
+'''all_assets = ee.data.listAssets({"parent": "projects/ee-jonyegbula/assets"})["assets"]
+assets_2007 = [a['name'] for a in all_assets if '1984' in a['name']]
+for asset in assets_2007: ee.data.deleteAsset(asset)'''
 
 # set visibility of all assets
 acl_update = {'all_users_can_read': True}
@@ -27,7 +27,10 @@ for year in range(1984, 2025):
     tifs = glob.glob(f"files/results/{year}*.tif")
     for tif in tifs:
         asset_id = asset + tif[14:-4]
-        ee.data.setAssetIamPolicy(asset_id, acl_update)
+        try:
+            ee.data.setAssetAcl(asset_id, acl_update)
+        except:
+            continue
     print(year, end=' ')
 
 # get max 98th percentile value for each attribute for GEE app
@@ -427,7 +430,8 @@ shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg
 utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 res = 30
-inputdir = "files/2024"
+year = 2024
+inputdir = f"files/{year}"
 all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
 
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
@@ -455,7 +459,7 @@ all_data = pd.concat(df_parts, ignore_index=True)
 all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
 utm_lons, utm_lats = all_data['X'], all_data['Y']
 for variable in ["ANPP", "BNPP", "NEP"]:
-    outfile = f"files/results/2024_{variable}_4.tif"
+    outfile = f"files/results/{year}_{variable}_4.tif"
     pixel_values = all_data[variable]
     gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
     out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))

@@ -121,7 +121,7 @@ def extractAllValues(landsat, year):
     # also extract two sets of values: the current year and the previous 5 years.
     df_prev_5 = df_daily.loc[:str(years[-1]-1)+"-09-30"]
     df_year = df_daily.loc[str(years[-1]-1)+"-10-01":]
-    df_year = pd.concat([df_year, df_grid], axis=1)
+    df_year = pd.concat([df_year, df_grid], axis=1, ignore_index=True)
     
     # Active growing season is also when NDVI >= 0.2 without snow or water coverage, at above zero temperature
     df_non_snow = df_year[(df_year.NDSI <= 0.2)]
@@ -433,7 +433,7 @@ data.drop_duplicates(inplace=True)
 # data['ID'].value_counts()      # number of times same ID was sampled
 
 # remove irrelevant columns for ML and determine X and Y variables
-var_col = [c for c in list(cols[10:]) if c not in ['NDVI_June', 'NDPI_June', 'EVI_June', 'NDGI_June', 'NDVI_Sept', 'NDPI_Sept', 'EVI_Sept', 'NDGI_Sept', 'dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days']]
+var_col = [c for c in list(cols[10:]) if c not in ['NDVI_June', 'NDPI_June', 'SAVI_June', 'NDVI_Sept', 'NDPI_Sept', 'SAVI_Sept', 'dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'Minimum_temperature', 'Maximum_temperature', 'Active_growth_days']]
 '''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
 var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
 var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
@@ -506,7 +506,7 @@ X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # for the 5-year averaged data
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.7, validation_fraction=0.2,
+bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=11, n_estimators=125, subsample=0.5, validation_fraction=0.2,
                                       n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2,
