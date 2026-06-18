@@ -312,26 +312,20 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
     or by grid search which searches through all provided possibilities with GridSearchCV
 '''
 # optimize hyperparameters with RandomizedSearchCV on the training data (takes 30ish minutes)
-parameters = {'learning_rate': uniform(), 'subsample': uniform(), 
-              'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
-randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters,
-                           cv=5, n_iter=20, scoring='neg_mean_squared_error')
+parameters = {'learning_rate': uniform(), 'subsample': uniform(), 'n_estimators': randint(5, 5000), 'max_depth': randint(2, 10)}
+randm = RandomizedSearchCV(estimator=GradientBoostingRegressor(), param_distributions=parameters, cv=5, n_iter=20, scoring='neg_mean_squared_error')
 randm.fit(X_train, y_train)
 randm.best_params_      # outputs all parameters of ideal estimator
 
 # same process above but with GridSearchCV for comparison (takes even longer)
-parameters = {'learning_rate': [0.03], 'subsample': [0.5, 0.6], 
-              'n_estimators': [2500], 'max_depth': [4,5,6,7,8,9]}
+parameters = {'learning_rate': [0.03], 'subsample': [0.5, 0.6], 'n_estimators': [2500], 'max_depth': [4,5,6,7,8,9]}
 grid = GridSearchCV(estimator=GradientBoostingRegressor(), param_grid=parameters, cv=5, scoring='neg_mean_squared_error')
 grid.fit(X_train, y_train)
 grid.best_params_
 
 # run gradient boosting with optimized parameters (chosen with GridSearchCV) on training data
-ghg_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=7, n_estimators=5000, subsample=1.0, validation_fraction=0.2,
-                                      n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
-ghg_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.02, max_depth=7, 
-                                      n_estimators=5000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=10,  
-                                      max_features='log2', random_state=10)
+ghg_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=7, n_estimators=5000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
+ghg_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.02, max_depth=7, n_estimators=5000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', random_state=10)
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)
 # Make partial dependence plots (3 by 3 per page)

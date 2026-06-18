@@ -23,13 +23,8 @@ def trainModel(alph, n_est):
     for sub in parameters['subsample']:
         for depth in parameters['max_depth']:
             # use hyperparameter combination to fit model (or alternative 1 SD test model below)
-            gbm_model = GradientBoostingRegressor(learning_rate=alph, max_depth=depth, n_estimators=n_est, subsample=sub,
-                                                   validation_fraction=0.2, n_iter_no_change=10, max_features='log2',
-                                                   random_state=10)
-            '''
-            gbm_model = GradientBoostingRegressor(loss="quantile", learning_rate=alph, alpha=0.8413, max_depth=depth, 
-                                                  n_estimators=n_est, subsample=sub, validation_fraction=0.2, n_iter_no_change=50,  
-                                                  max_features='log2', random_state=10)'''
+            gbm_model = GradientBoostingRegressor(learning_rate=alph, max_depth=depth, n_estimators=n_est, subsample=sub, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', random_state=10)
+            # gbm_model = GradientBoostingRegressor(loss="quantile", learning_rate=alph, alpha=0.8413, max_depth=depth, n_estimators=n_est, subsample=sub, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', random_state=10)
             gbm_model.fit(X_train, y_train)
             
             # compute relevant accuracy stats of actual model and test performance of hyperparameter combination
@@ -71,9 +66,7 @@ def trainClassifier(alph, n_est):
     for sub in parameters['subsample']:
         for depth in parameters['max_depth']:
             # use hyperparameter combination to fit model (or alternative 1 SD test model below)
-            gbm_model = GradientBoostingClassifier(learning_rate=alph, max_depth=depth, n_estimators=n_est, subsample=sub,
-                                                   validation_fraction=0.2, n_iter_no_change=50, max_features='log2',
-                                                   random_state=10)
+            gbm_model = GradientBoostingClassifier(learning_rate=alph, max_depth=depth, n_estimators=n_est, subsample=sub, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', random_state=10)
             gbm_model.fit(X_train, y_train)
             
             # compute relevant accuracy stats of actual model and test performance of hyperparameter combination
