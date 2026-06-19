@@ -332,7 +332,7 @@ def remakeFinalPredictions(year, makeStatic=False):
     static_col = mycols[:2] + mycols[-9:]
     flux_outfile = f"files/results/{year}_Meadow_flux.csv"
     var_outfile = f"files/results/{year}_Meadows.csv"
-    static_outfile = f"files/results/{year}_Meadow_static.csv"
+    static_outfile = "files/results/Meadow_static_variables.csv"
     all_flux_data = pd.DataFrame(columns=flux_col)
     all_var_data = pd.DataFrame(columns=var_col)
     all_static_data = pd.DataFrame(columns=static_col)
@@ -346,57 +346,62 @@ def remakeFinalPredictions(year, makeStatic=False):
     
     # iterate through each meadow's CSV to extract data
     for idx in range(len(all_files)):
-        file = all_files[idx]
-        zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
-        meadowId = int(file.split("_")[2][:-4])
-        jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
-        df = pd.read_csv(file)
-        
-        # Predict AGB/BGB and set negative values to zero, then convert to NEP
-        rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
-        df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
-        df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
-        sd_agb = agb_84_model.predict(df.loc[:, agb_sd_col])
-        df['1SD_ANPP'] = abs(sd_agb - df['HerbBio.g.m2'])
-        sd_bgb = bgb_84_model.predict(df.loc[:, bgb_sd_col])
-        bgb_sd = abs(sd_bgb - df['Roots.kg.m2'])
-        df.loc[df['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
-        df.loc[df['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
-        df['Root_Turnover'] = (df['Roots.kg.m2']*0.49 - ((df['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
-        df['Root_Exudates'] = df['Roots.kg.m2']*1000*df['Active_growth_days']*12*1.04e-4
-        df['BNPP'] = df['Root_Turnover'] + df['Root_Exudates']
-        df['ANPP'] = df['HerbBio.g.m2']*0.433
-        df['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*df['Active_growth_days']*12*0.104
-        anpp_draws = np.random.normal(df['ANPP'].to_frame(), df['1SD_ANPP'].to_frame(), size=(len(df['ANPP']), 100))
-        bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
-        df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
-        df['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
-        # predict soil/percent C and set negative values to zero
-        df['PercentC'] = percentc_model.predict(df.loc[:, percentc_col])
-        df['SoilC'] = soilc_model.predict(df.loc[:, soilc_col])
-        df.loc[df['PercentC'] < 0, 'PercentC'] = 0
-        df.loc[df['SoilC'] < 0, 'SoilC'] = 0
-        
-        val = [meadowId, df.shape[0]]
-        for col in mycols[:20]:
-            stats = df[col].describe().values
-            val.extend(list(stats[1:4]) + [stats[-1]])
-            if col == 'NEP': nep_sum = 900*stats[0]*stats[1]
-        stats_df.loc[len(stats_df)] = val + [nep_sum, jepson]
-        
-        gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
-        df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
-        df[['ID', 'Jepson_Region']] = meadowId, jepson
-        df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
-        all_flux_data = pd.concat([all_flux_data, df[flux_col]], ignore_index=True)
-        all_var_data = pd.concat([all_var_data, df[var_col]], ignore_index=True)
-        if makeStatic:
-            all_static_data = pd.concat([all_static_data, df[static_col]], ignore_index=True)
-        if idx%1000 == 0: print(idx, end=" ")
+        try:
+            file = all_files[idx]
+            zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
+            meadowId = int(file.split("_")[2][:-4])
+            jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
+            df = pd.read_csv(file)
+            
+            # Predict AGB/BGB and set negative values to zero, then convert to NEP
+            rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
+            df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
+            df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
+            sd_agb = agb_84_model.predict(df.loc[:, agb_sd_col])
+            df['1SD_ANPP'] = abs(sd_agb - df['HerbBio.g.m2'])
+            sd_bgb = bgb_84_model.predict(df.loc[:, bgb_sd_col])
+            bgb_sd = abs(sd_bgb - df['Roots.kg.m2'])
+            df.loc[df['HerbBio.g.m2'] < 0, 'HerbBio.g.m2'] = 0
+            df.loc[df['Roots.kg.m2'] < 0, 'Roots.kg.m2'] = 0
+            df['Root_Turnover'] = (df['Roots.kg.m2']*0.49 - ((df['Roots.kg.m2']*0.49)*np.exp(-0.53)))*0.368*1000
+            df['Root_Exudates'] = df['Roots.kg.m2']*1000*df['Active_growth_days']*12*1.04e-4
+            df['BNPP'] = df['Root_Turnover'] + df['Root_Exudates']
+            df['ANPP'] = df['HerbBio.g.m2']*0.433
+            df['1SD_BNPP'] = (bgb_sd*0.49 - ((bgb_sd*0.49)*np.exp(-0.53)))*368 + bgb_sd*df['Active_growth_days']*12*0.104
+            anpp_draws = np.random.normal(df['ANPP'].to_frame(), df['1SD_ANPP'].to_frame(), size=(len(df['ANPP']), 100))
+            bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
+            df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
+            df['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
+            # predict soil/percent C and set negative values to zero
+            df['PercentC'] = percentc_model.predict(df.loc[:, percentc_col])
+            df['SoilC'] = soilc_model.predict(df.loc[:, soilc_col])
+            df.loc[df['PercentC'] < 0, 'PercentC'] = 0
+            df.loc[df['SoilC'] < 0, 'SoilC'] = 0
+            
+            val = [meadowId, df.shape[0]]
+            for col in mycols[:20]:
+                stats = df[col].describe().values
+                val.extend(list(stats[1:4]) + [stats[-1]])
+                if col == 'NEP': nep_sum = 900*stats[0]*stats[1]
+            stats_df.loc[len(stats_df)] = val + [nep_sum, jepson]
+            
+            gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+            df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
+            df[['ID', 'Jepson_Region']] = meadowId, jepson
+            df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
+            all_flux_data = pd.concat([all_flux_data, df[flux_col]], ignore_index=True)
+            all_var_data = pd.concat([all_var_data, df[var_col]], ignore_index=True)
+            if makeStatic:
+                all_static_data = pd.concat([all_static_data, df[static_col]], ignore_index=True)
+            if idx%1000 == 0: print(idx, end=" ")
+        except: # fix wrongly appended NDVI column issues (x and y suffixes)
+            if "NDVI_June_y" in df.columns:
+                df.columns = list(df.columns)[:-2] + ["NDVI_June", "NDVI_Sept"]
+                idx -= 1
+            continue    
     
     del sd_agb, sd_bgb, bgb_sd, anpp_draws, bnpp_draws, rh_draws
     # write all files to CSVs
-    stats_df.drop(stats_df.columns[-18:-2], axis=1, inplace=True)
     stats_df.to_csv(var_outfile.split(".")[0] + "_stats.csv", index=False)
     all_flux_data = all_flux_data.dropna().drop_duplicates().reset_index(drop=True)
     all_var_data = all_var_data.dropna().drop_duplicates().reset_index(drop=True)
@@ -404,10 +409,12 @@ def remakeFinalPredictions(year, makeStatic=False):
     all_flux_data.to_csv(flux_outfile, index=False)
     all_var_data.to_csv(var_outfile, index=False)
     all_static_data.to_csv(static_outfile, index=False)
+    
+    return year
+
 '''
 for year in range(1985, 2025):
-    remakeFinalPredictions(year)
-    if year == 2024: remakeFinalPredictions(year, True)
+    remakeFinalPredictions(year, True) if year == 2024 else remakeFinalPredictions(year)
 '''
 
 
