@@ -313,7 +313,7 @@ def predictSoilandPercentCarbon(years):
 def remakeFinalPredictions(year, makeStatic=False):
     '''This regenerates NEP and soil/percent C predictions and standard errors (previous 2 functions) into grouped CSVs'''
     
-    mycols = ['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh', 'PercentC', 'SoilC', 'Annual_Precipitation', 'AET', 'Active_growth_days', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'SWE', 'Wet_days', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'dBlue', 'dGreen', 'dRed', 'dNIR', 'dSWIR_1', 'dSWIR_2', 'dNDVI', 'dNDWI', 'dEVI', 'dSAVI', 'dBSI', 'dNDPI', 'dNDGI', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter']
+    mycols = ['ID', 'Jepson_Region', 'X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh', 'PercentC', 'SoilC', 'Annual_Precipitation', 'AET', 'Active_growth_days', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'SWE', 'Wet_days', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'dBlue', 'dGreen', 'dRed', 'dNIR', 'dSWIR_1', 'dSWIR_2', 'dNDVI', 'dNDWI', 'dEVI', 'dSAVI', 'dBSI', 'dNDPI', 'dNDGI', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter']
     
     # load all models and standard errors
     with open('files/bgb_soil_models.pckl', 'rb') as f:
@@ -327,9 +327,9 @@ def remakeFinalPredictions(year, makeStatic=False):
     _, agb_sd_col, bgb_sd_col = list(ghg_84_model.feature_names_in_), list(agb_84_model.feature_names_in_), list(bgb_84_model.feature_names_in_)
     
     # differentiate the different kinds of output
-    flux_col = mycols[:10]
-    var_col = mycols[:2] + mycols[10:-9]
-    static_col = mycols[:2] + mycols[-9:]
+    flux_col = mycols[:12]
+    var_col = mycols[:4] + mycols[12:-9]
+    static_col = mycols[:4] + mycols[-9:]
     flux_outfile = f"files/results/{year}_Meadow_flux.csv"
     var_outfile = f"files/results/{year}_Meadows.csv"
     static_outfile = "files/results/Meadow_static_variables.csv"
@@ -339,7 +339,7 @@ def remakeFinalPredictions(year, makeStatic=False):
     
     # create summary statistics dataframe for each variable
     statCol = ['ID', 'PixelCount']
-    for col in mycols[:20]:
+    for col in mycols[2:22]:
         statCol.extend([col+"_mean", col+"_std", col+"_min", col+"_max"])
     stats_df = pd.DataFrame(columns=(statCol + ["NEP_sum", "Jepson_Region"]))
     all_files = [f for f in glob.glob(f"files/{year}/*.csv")]
@@ -379,7 +379,7 @@ def remakeFinalPredictions(year, makeStatic=False):
             df.loc[df['SoilC'] < 0, 'SoilC'] = 0
             
             val = [meadowId, df.shape[0]]
-            for col in mycols[:20]:
+            for col in mycols[2:22]:
                 stats = df[col].describe().values
                 val.extend(list(stats[1:4]) + [stats[-1]])
                 if col == 'NEP': nep_sum = 900*stats[0]*stats[1]
