@@ -349,9 +349,9 @@ for meadowIdx in range(shapefile2.shape[0]):
     newFeat = shapefile.loc[shapefile.geometry.intersection(feature.geometry).area.idxmax()]
     shapefile2.loc[meadowIdx, 'ID_2'] = newFeat.ID
     if meadowIdx%1000 == 0: print(meadowIdx, end=' ')
-# optionally simplify polygons (GEE allows at most 2,000,000 vertices for shapefiles)
+'''# optionally simplify polygons (GEE allows at most 2,000,000 vertices for shapefiles)
 shapefile.geometry = shapefile.geometry.simplify(tolerance=0.00001, preserve_topology=True)
-shapefile.count_coordinates().sum()
+shapefile.count_coordinates().sum()'''
 # save to file to be used for correcting others
 shapefile2.to_file("files/AllPossibleMeadows_2025-10-22.shp", driver="ESRI Shapefile")
 
@@ -368,14 +368,26 @@ for year in range(1984, 2025):
     print(year, end=' ')
 
 # create "ID_2" for meadow pixel level files
-for year in range(1984, 2025):
+for year in range(1985, 2025):
     data = pd.read_csv(f"files/results/{year}_Meadows.csv")
+    data1 = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
     data['ID_2'] = data['ID']
+    data1['ID_2'] = data1['ID']
     oldID = set(data.ID)
     for meadowId in oldID:
         newID = shapefile[shapefile.ID == meadowId].iloc[0]
         data.loc[(data.ID == meadowId), 'ID_2'] = newID.ID_2
+        data1.loc[(data1.ID == meadowId), 'ID_2'] = newID.ID_2
+    if year == 2024:    # for single CSV of unchanging (time-constant) variables
+        data2 = pd.read_csv("files/results/Meadow_static_variables.csv")
+        data2['ID_2'] = data2['ID']
+        oldID = set(data2.ID)
+        for meadowId in oldID:
+            newID = shapefile[shapefile.ID == meadowId].iloc[0]
+            data2.loc[(data2.ID == meadowId), 'ID_2'] = newID.ID_2
+        data2.to_csv("files/results/Meadow_static_variables.csv", index=False)
     data.to_csv(f"files/results/{year}_Meadows.csv", index=False)
+    data1.to_csv(f"files/results/{year}_Meadow_flux.csv", index=False)
     print(year, end=' ')
 
 # rename all post-prediction geotiffs and csv outputs from carbon model (wasn't run due to ID conflicts: see 10320)

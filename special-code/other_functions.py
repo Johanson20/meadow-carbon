@@ -405,10 +405,12 @@ def remakeFinalPredictions(year, makeStatic=False):
     stats_df.to_csv(var_outfile.split(".")[0] + "_stats.csv", index=False)
     all_flux_data = all_flux_data.dropna().drop_duplicates().reset_index(drop=True)
     all_var_data = all_var_data.dropna().drop_duplicates().reset_index(drop=True)
-    all_static_data = all_static_data.dropna().drop_duplicates().reset_index(drop=True)
     all_flux_data.to_csv(flux_outfile, index=False)
     all_var_data.to_csv(var_outfile, index=False)
-    all_static_data.to_csv(static_outfile, index=False)
+    if makeStatic:
+        all_static_data = all_static_data.dropna().drop_duplicates().reset_index(drop=True)
+        all_static_data.to_csv(static_outfile, index=False)
+    del df, gdf, stats_df, all_flux_data, all_var_data, all_static_data
     
     return year
 
