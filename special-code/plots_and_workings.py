@@ -36,7 +36,7 @@ for year in range(1984, 2025):
 # get max 98th percentile value for each attribute for GEE app
 store = [0,0,0,0,0,0, 0,0,0,0,0,0]
 for year in range(1986, 2025):
-    data = pd.read_csv(f"files/results/{year}_Meadows.csv")
+    data = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
     for i in range(12):
         col = data.columns[i+2]
         store[i] = max(store[i], data[col].quantile(0.98))
@@ -54,10 +54,10 @@ data['BNPP'] = data['Root_Turnover'] + data['Root_Exudates']
 data.head()
 
 # limit NEP values to 1000 and include ID/Jepson region in CSVs
-data = pd.read_csv("files/results/2024_Meadows.csv")
+data = pd.read_csv("files/results/2024_Meadow_flux.csv")
 jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
 for year in range(1984, 2025):
-    outfile = f'files/results/{year}_Meadows.csv'
+    outfile = f'files/results/{year}_Meadow_flux.csv'
     statsfile = f'files/results/{year}_Meadows_stats.csv'
     stats = pd.read_csv(statsfile)
     stats['ID'], stats['PixelCount'] = [int(x) for x in stats['ID']], [int(x) for x in stats['PixelCount']]
@@ -96,7 +96,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year, month, day = target_date.split("-")
-    df = pd.read_csv(f"files/results/{year}_Meadows.csv")
+    df = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
     # next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
     
@@ -109,7 +109,7 @@ for idx in range(data.shape[0]):
         continue
 
 for year in range(1984, 2025):
-    # df = pd.read_csv(f"files/results/{year}_Meadows.csv")
+    # df = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
     data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
     # data['ID'] = data['ID'].astype(int)
     # data = data.sort_values(by='ID', ascending=True)
@@ -150,7 +150,7 @@ def get_closest_nep(csv_path, meadow_id, lon, lat, chunksize=200000):
 
 results = []
 for _, r in all_data.iterrows():
-    nep = get_closest_nep(f"files/results/{year}_Meadows.csv", r.ID, r.Longitude, r.Latitude)
+    nep = get_closest_nep(f"files/results/{year}_Meadow_flux.csv", r.ID, r.Longitude, r.Latitude)
     results.append(nep)
     if _%20 == 0: print(_, end=' ')
 
@@ -404,6 +404,60 @@ for endname in ["tif", "csv"]:
             newName[2], newName[-1] = str(newID.ID_2), f".{endname}"
             if oldId != newID.ID_2: os.rename(file, "_".join(newName))
         print(year, end=' ')
+
+# drop min and max of each column in meadow summary stats files
+for year in range(1985, 2025):
+    flux_outfile = f"files/results/{year}_Meadow_flux.csv"
+    var_outfile = f"files/results/{year}_Meadows.csv"
+    stats_outfile = f"files/results/{year}_Meadows_stats.csv"
+    data = pd.read_csv(stats_outfile)
+    data1 = pd.read_csv(var_outfile)
+    data2 = pd.read_csv(flux_outfile)
+    
+    statCol = ['X_std', 'X_min', 'X_max', 'Y_std', 'Y_min', 'Y_max']
+    for col in mycols[2:20]:    # my cols gotten from remakeFinalPredictions of other_functions.py
+        statCol.extend([col+"_min", col+"_max"])
+    data.drop(statCol, axis=1, inplace=True)
+    data1.drop(['PercentC', 'SoilC'], axis=1, inplace=True)
+    
+    # columns starting with 1 should be modified (e.g. 1SD_NEP to SD_NEP)
+    cols = list(data.columns)
+    for i in range(len(cols)):
+        col = cols[i]
+        if col.startswith("1"): cols[i] = col[1:]
+    data.columns = cols
+    
+    cols = list(data2.columns)
+    for i in range(len(cols)):
+        col = cols[i]
+        if col.startswith("1"): cols[i] = col[1:]
+    data2.columns = cols
+    
+    data2.to_csv(flux_outfile, index=False)
+    data1.to_csv(var_outfile, index=False)
+    data.to_csv(stats_outfile, index=False)
+
+# add NEP cap 1000 column to meadow summary stats files
+for year in range(1985, 2025):
+    stats_outfile = f"files/results/{year}_Meadows_stats.csv"
+    data = pd.read_csv(stats_outfile)
+    # drop these columns as they aren't finalized
+    data.drop(['PercentC_mean', 'PercentC_std', 'SoilC_mean', 'SoilC_std'], axis=1, inplace=True)
+    data2 = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
+    stats = (data2.assign(NEP=data2.NEP.clip(upper=1000)).groupby('ID')['NEP'].agg(NEP_Cap_1000_mean='mean', NEP_Cap_1000_sum='sum'))
+    data = data.merge(stats, on='ID', how='left')    
+    data.to_csv(stats_outfile, index=False)
+    print(year, end=' ')
+
+# create meadow-level  summary of temporally unchanging variables
+mycols = ['ID', 'Jepson_Region', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'ID_2']
+data = pd.read_csv("files/results/Meadow_static_variables.csv")
+data2 = data.groupby('ID')[['ID', 'Jepson_Region', 'ID_2']].first()
+for col in mycols[2:-1]:
+    stats = data.assign(col=data[col]).groupby('ID')[col].mean()
+    data2[col] = list(stats)    
+    print(col, end=' ')
+data2.to_csv("files/results/Meadow_static_summary.csv")
 
 # rename all pre-prediction geotiffs from carbon model (wasn't run due to ID conflicts: see 10327 to 10320)
 endname = "csv"

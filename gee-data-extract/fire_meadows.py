@@ -147,7 +147,7 @@ for idx in range(len(results)):
 meadow_data[['ANPP_mean', 'ANPP_std']] = [None, None]
 my_year = str(meadows.DtFire[0].year)
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
-data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
+data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv")
 # spatial join between each pixel of csv and meadow's geometry
 pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
@@ -166,7 +166,7 @@ for meadowIdx in range(meadow_data.shape[0]):
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
     if year != my_year:
         my_year = year
-        data = pd.read_csv(f"files/results/{my_year}_Meadows.csv")
+        data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv")
         pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
@@ -207,7 +207,7 @@ meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID
 my_year = meadows.YEAR_[0]
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
 mycols = ['X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP']
-data = pd.read_csv(f"files/results/{my_year}_Meadows.csv", usecols=mycols)
+data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
 # spatial join between each pixel of csv and meadow's geometry
 pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
@@ -219,7 +219,7 @@ for meadowIdx in range(meadows.shape[0]):
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
     if year != my_year:
         my_year = year
-        data = pd.read_csv(f"files/results/{my_year}_Meadows.csv", usecols=mycols)
+        data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
         pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')[mycols[2:]].agg(['mean', 'std'])

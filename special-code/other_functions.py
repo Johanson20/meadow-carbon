@@ -313,7 +313,7 @@ def predictSoilandPercentCarbon(years):
 def remakeFinalPredictions(year, makeStatic=False):
     '''This regenerates NEP and soil/percent C predictions and standard errors (previous 2 functions) into grouped CSVs'''
     
-    mycols = ['ID', 'Jepson_Region', 'X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh', 'PercentC', 'SoilC', 'Annual_Precipitation', 'AET', 'Active_growth_days', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'SWE', 'Wet_days', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'dBlue', 'dGreen', 'dRed', 'dNIR', 'dSWIR_1', 'dSWIR_2', 'dNDVI', 'dNDWI', 'dEVI', 'dSAVI', 'dBSI', 'dNDPI', 'dNDGI', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter']
+    mycols = ['ID', 'Jepson_Region', 'X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh', 'Annual_Precipitation', 'AET', 'Active_growth_days', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'SWE', 'Wet_days', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'dBlue', 'dGreen', 'dRed', 'dNIR', 'dSWIR_1', 'dSWIR_2', 'dNDVI', 'dNDWI', 'dEVI', 'dSAVI', 'dBSI', 'dNDPI', 'dNDGI', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter']
     
     # load all models and standard errors
     with open('files/bgb_soil_models.pckl', 'rb') as f:
@@ -339,8 +339,11 @@ def remakeFinalPredictions(year, makeStatic=False):
     
     # create summary statistics dataframe for each variable
     statCol = ['ID', 'PixelCount']
-    for col in mycols[2:22]:
-        statCol.extend([col+"_mean", col+"_std", col+"_min", col+"_max"])
+    for col in mycols[2:20] + ['NEP_Cap_1000']:
+        if col in mycols[2:4]:
+            statCol.append(col+"_mean")
+        else:
+            statCol.extend([col+"_mean", col+"_std"])
     stats_df = pd.DataFrame(columns=(statCol + ["NEP_sum", "Jepson_Region"]))
     all_files = [f for f in glob.glob(f"files/{year}/*.csv")]
     
@@ -377,9 +380,10 @@ def remakeFinalPredictions(year, makeStatic=False):
             df['SoilC'] = soilc_model.predict(df.loc[:, soilc_col])
             df.loc[df['PercentC'] < 0, 'PercentC'] = 0
             df.loc[df['SoilC'] < 0, 'SoilC'] = 0
+            df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
             
             val = [meadowId, df.shape[0]]
-            for col in mycols[2:22]:
+            for col in mycols[2:20] + ['NEP_Cap_1000']:
                 stats = df[col].describe().values
                 val.extend(list(stats[1:4]) + [stats[-1]])
                 if col == 'NEP': nep_sum = 900*stats[0]*stats[1]
@@ -388,7 +392,6 @@ def remakeFinalPredictions(year, makeStatic=False):
             gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
             df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
             df[['ID', 'Jepson_Region']] = meadowId, jepson
-            df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
             all_flux_data = pd.concat([all_flux_data, df[flux_col]], ignore_index=True)
             all_var_data = pd.concat([all_var_data, df[var_col]], ignore_index=True)
             if makeStatic:
@@ -440,7 +443,7 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
         df.drop(attribute, axis=1, inplace=True)
         print(attribute, "done!")
 
-# splitCSVToGeotiffs("files/results/2021_Meadows.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
+# splitCSVToGeotiffs("files/results/2021_Meadow_flux.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
 
 
 # this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
