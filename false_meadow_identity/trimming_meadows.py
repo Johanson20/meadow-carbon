@@ -6,12 +6,13 @@
 import os, ee
 import pandas as pd
 import geopandas as gpd
-os.chdir("Code")
+
+os.chdir("Code")     # adjust directory
 
 # ee.Authenticate()
 ee.Initialize()
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp")
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp")
 
 # examine a single meadow for its properties (just for learning)
 feature = shapefile.iloc[4].geometry
@@ -23,13 +24,13 @@ landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2
 # landsat9_collection = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 
 def calculate_indices(image):
-    # this calculates indices such as NDVI and NDMI and adds them to the image
+    ''' this calculates indices such as NDVI and NDWI and adds them to the image '''
     ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    ndmi = image.normalizedDifference(['SR_B3', 'SR_B5']).rename('NDMI')
-    return image.addBands([ndvi, ndmi])
+    ndwi = image.normalizedDifference(['SR_B3', 'SR_B5']).rename('NDWI')
+    return image.addBands([ndvi, ndwi])
 
 # create an empty dataframe that would be saved as a csv after filling it
-out_df = pd.DataFrame(columns=['ID', 'Area_m2', 'Area_km2', 'NDVI', 'NDMI'])
+out_df = pd.DataFrame(columns=['ID', 'Area_m2', 'Area_km2', 'NDVI', 'NDWI'])
 rowId = 0
 
 for index, row in shapefile.iterrows():
@@ -44,17 +45,17 @@ for index, row in shapefile.iterrows():
     # extract least cloudy landsat images for July 2022 and extract indices
     landsat_image = landsat8_collection.filterBounds(shapefile_bbox).sort("CLOUD_COVER").first()
     meadow_image = calculate_indices(landsat_image)
-    indices = meadow_image.select(['NDVI', 'NDMI']).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
-    ndvi_number, ndmi = list(indices.values())
+    indices = meadow_image.select(['NDVI', 'NDWI']).reduceRegion(ee.Reducer.mean(), shapefile_bbox, 30).getInfo()
+    ndvi_number, ndwi = list(indices.values())
     
-    # append values only if NDVI/NDMI values are missing or not meeting the conditions below (not indicative of real meadows)
-    if not ndvi_number or not ndmi or (ndvi_number < 0.2 and ndmi < 0.5):
+    # append values only if NDVI/NDWI values are missing or not meeting the conditions below (not indicative of real meadows)
+    if not ndvi_number or not ndwi or (ndvi_number < 0.2 and ndwi < 0.5):
         val = list(row.values)[:3]
-        val += [ndvi_number, ndmi]
+        val += [ndvi_number, ndwi]
         out_df.loc[rowId] = val
         rowId += 1
     
     if index%100==0: print(index, end=" ")
     
 shapefile = None
-out_df.to_csv('csv/False_meadows_2022.csv', index=False)
+out_df.to_csv('../csv/False_meadows_2022.csv', index=False)

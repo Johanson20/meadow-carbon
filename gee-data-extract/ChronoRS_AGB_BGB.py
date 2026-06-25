@@ -9,7 +9,7 @@ import pandas as pd
 os.chdir("Code")    # adjust directory
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("csv/ChronoRS_AGB.csv")
+data = pd.read_csv("../csv/ChronoRS_AGB.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -18,8 +18,8 @@ ee.Initialize()
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
 
 
-# add B5 band value explicitly to properties of landsat
 def addB5(image):
+    ''' add B5 band value explicitly to properties of landsat '''
     return image.set('B5_value', image.select('B5').reduceRegion(ee.Reducer.mean(), point, 30).get('B5'))
 
 
@@ -58,11 +58,11 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/ChronoRS_AGB_NIR.csv', index=False)
+data.to_csv('../csv/ChronoRS_AGB_NIR.csv', index=False)
 
 
 # Repeating above steps for BGB
-data = pd.read_csv("csv/ChronoRS_BGB.csv")
+data = pd.read_csv("../csv/ChronoRS_BGB.csv")
 data['SampleDate'] = pd.to_datetime(data['SampleDate'], format = '%m/%d/%y')
 data.head()
 
@@ -99,4 +99,4 @@ data['peak_date'] = peak_dates
 data.head(10)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/ChronoRS_BGB_NIR.csv', index=False)
+data.to_csv('../csv/ChronoRS_BGB_NIR.csv', index=False)

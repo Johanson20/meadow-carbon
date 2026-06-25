@@ -18,9 +18,8 @@ data.head()
 ee.Initialize()
 
 
-# Function to mask clouds
 def maskClouds(image):
-    # mask out cloud based on bits in QA_pixel
+    ''' mask out cloud based on bits in QA_pixel; then scale values '''
     qa = image.select('QA_PIXEL')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
     cirrus = qa.bitwiseAnd(1 << 2).eq(0)
@@ -30,14 +29,15 @@ def maskClouds(image):
     cloud_mask = dilated_cloud.And(cirrus).And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
 
-# Calculates absolute time difference (in days) from a target date, in which the images are acquired
+
 def calculate_time_difference(image):
+    ''' Calculates absolute time difference of a landsat image and a target date (in days) '''
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
 
 
-# Function to extract cloud free band values per pixel from landsat 8 or landsat 7
 def getBandValues(landsat_collection, point, target_date, bufferDays = 30, landsatNo = 8):
+    ''' filter landsat images by location and dates about specified day radius and sort by proximity to sample date '''
     # filter landsat images by location
     spatial_filtered = landsat_collection.filterBounds(point)
     # filter the streamlined images by dates +/- a certain number of days
@@ -94,7 +94,6 @@ for id in range(data.shape[0]):
                 print(id, "Searching Landsat 7 collection with 60-day search radius")
                 band_values, t_diff, date_epoch, time_epoch = getBandValues(landsat7_collection, point,
                                                                  target_date, 60, 7)
-                
     Blue.append(band_values[0])
     Green.append(band_values[1])
     Red.append(band_values[2])
@@ -107,7 +106,6 @@ for id in range(data.shape[0]):
     acq_time.append(time_epoch.split('.')[0])
     
     if id%100 == 0: print(id, end=' ')
-
 
 data['Blue'] = Blue
 data['Green'] = Green
@@ -128,10 +126,10 @@ data.head(10)
 ids = [x for x in Blue if x]
 
 # write updated dataframe to new csv file
-data.to_csv('csv/GHG_Data_Sample_Bands.csv', index=False)
+data.to_csv('../csv/GHG_Data_Sample_Bands.csv', index=False)
 
 
-data = pd.read_csv("csv/GHG_Data_Sample_Bands.csv")
+data = pd.read_csv("../csv/GHG_Data_Sample_Bands.csv")
 data.head()
 
 min_temp, max_temp = [], []
@@ -154,7 +152,7 @@ for id in range(data.shape[0]):
 data['Minimum_temperature'] = min_temp
 data['Maximum_temperature'] = max_temp
 
-data.to_csv('csv/GHG_Data_Sample_Bands_Temp.csv', index=False)
+data.to_csv('../csv/GHG_Data_Sample_Bands_Temp.csv', index=False)
 
 '''
 # TESTING Landsat usage from google earth engine

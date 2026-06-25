@@ -24,18 +24,18 @@ from shapely.geometry import box, Polygon
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory suitably (one folder up based on paths of other files being created)
 os.chdir(mydir)
-warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
+warnings.filterwarnings("ignore")   # hide warning messages
 
 
 def G_driveAccess():
+    ''' Authenticate and create the PyDrive client for google drive access '''
     global drive
-    # Authenticate and create the PyDrive client for google drive access
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
     if gauth.credentials is None:   # Authenticate if there are no valid credentials
@@ -50,7 +50,7 @@ def G_driveAccess():
 
 
 def geotiffToCsv(input_raster, bandnames):
-    # creates a dataframe of unique columns (hence combines repeating band names)
+    ''' creates a dataframe of unique columns: combines repeating bands of different dates and duplicates the rest across each date) '''
     geotiff = xr.open_rasterio(input_raster)
     df = geotiff.to_dataframe(name='value').reset_index()
     df = df.pivot_table(index=['y', 'x'], columns='band', values='value').reset_index()
@@ -81,7 +81,7 @@ def geotiffToCsv(input_raster, bandnames):
 
 
 def processGeotiff(df):
-    # drop null columns and convert infinity to NAs
+    ''' cleans up dataframe: drop null columns and convert infinity to NAs, formats date and calculates indices '''
     nullIds = list(np.where(df['tmmx'].isnull())[0])
     df.drop(nullIds, inplace = True)
     df.columns = cols[:-7]
@@ -111,12 +111,12 @@ def processGeotiff(df):
 
 
 def interpolate_pixel_group(group):
-    # interpolate NA rows (landsat 7 scan lines) with nearest different date of same pixel
+    ''' interpolate NA rows (landsat 7 scan lines) with nearest different date of same pixel '''
     return group.interpolate(method='linear', axis=0, limit_direction='both')
 
 
 def spatial_interpolate(row, df):
-    # interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date 
+    ''' interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date '''
     nearest_values = df[(df['Date'] == row['Date']) & ((df['X'] != row['X']) | (df['Y'] != row['Y']))].dropna()
     if not nearest_values.empty:
         row.fillna(nearest_values.median(), inplace=True)
@@ -130,6 +130,7 @@ def spatial_interpolate(row, df):
 
 
 def interpolate_group(group):
+    ''' calculate integrals, growing season variables and respiration values after interpolating rows of different dates for a unique pixel '''
     group = group.drop_duplicates(subset='Date').set_index('Date').reindex(date_range)
     group['Month'] = group.index.month
     interp_cols = [col for col in group.columns if col not in ['AET', 'Annual_Precipitation', 'Month']]
@@ -162,7 +163,7 @@ def interpolate_group(group):
 
 
 def maskAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel; then scale values
+    ''' rename bands and mask out cloud based on bits in QA_pixel; then scale values '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -176,7 +177,7 @@ def maskAndRename(image):
 
 
 def loadYearCollection(year):
-    # load GEE data for the relevant year and make folders for each year
+    ''' load temporal GEE data, generally re-used variables for the relevant year and make folders for each year '''
     global date_range, start_year, end_year, landsat_collection, gridmet_10, gridmet_11, terraclimate_10, terraclimate_11, daymet_10, daymet_11
     start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
     date_range = pd.date_range(start=start_year, end=end_year, freq='D')[:-1]
@@ -192,6 +193,7 @@ def loadYearCollection(year):
 
 
 def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None):
+    ''' split large meadows into small regions '''
     subregions = [shapefile_bbox] if makeSubRegions else 1
     if feature.Area_km2 > 22:     # split bounds of large meadows into smaller regions
         xmin, ymin, xmax, ymax = feature.geometry.bounds
@@ -215,7 +217,7 @@ def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None):
 
 
 def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
-    # clip flow, slope and daymet to meadow's bounds
+    ''' combine relevant bands into one multi-band image within meadow's bounds '''
     if crs == "EPSG:32611":
         flow_30m = flow_acc_11.clip(shapefile_bbox)
         slope_30m = slope_11.clip(shapefile_bbox)
@@ -264,6 +266,7 @@ def generateCombinedImage(crs, shapefile_bbox, image_list, dates):
 
 
 def downloadFinishedTasks(image_names):
+    ''' check status pf==of GEE assigned tasks and downloaded completed geotiffs from drive to local storage '''
     if not 'tasks' in globals():
         tasks = ee.batch.Task.list()
     taskImages = image_names.copy()
@@ -344,22 +347,25 @@ minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
 sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
 
-# load all relevant GEE images/collections for both UTM Zones
-flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
-flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
+# unify finer resolution to Landsat's 30m: slope and elevation (10.2m resolution); 
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536)
 slope_10 = ee.Terrain.slope(dem).clip(sierra_zone).reproject(crs="EPSG:32610", scale=30)
 slope_11 = ee.Terrain.slope(dem).clip(sierra_zone).reproject(crs="EPSG:32611", scale=30)
 
+# reads and merge Landsat data, and other datasets
 landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7 = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat5 = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
 landsat = landsat9.merge(landsat8).merge(landsat7).merge(landsat5).filterBounds(sierra_zone).map(maskAndRename)
 
+# extract flow and other datasets: flow accumulation (463.83m resolution); gridmet/terraclimate (4,638.3m resolution)
+flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
+flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(sierra_zone).select(['tmmn', 'tmmx'])
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterBounds(sierra_zone).select(['pr', 'aet'])
 daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V4").filterBounds(sierra_zone).select('swe')
+
 cols = ['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'Date', 'Minimum_temperature', 'Maximum_temperature', 'Annual_Precipitation', 'AET', 'Flow', 'Slope', 'SWE', 'X', 'Y', 'NDVI', 'NDWI', 'EVI', 'SAVI', 'BSI', 'NDPI', 'NDSI']
 G_driveAccess()
 allIdx = shapefile.index
@@ -371,6 +377,7 @@ loadYearCollection(year)
 
 
 def prepareMeadows(meadowIdx):
+    ''' function to search GEE dataset and extract relevant bands, combine them and download geotiffs '''
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile.loc[meadowIdx, :]
@@ -433,6 +440,7 @@ def prepareMeadows(meadowIdx):
 
 
 def processMeadow(meadowCues):
+    ''' function to process downloaded geotiffs, make predictions and standard error estimates and save outputs '''
     try:
         meadowIdx, totalBands = meadowCues
         if totalBands <= 14:

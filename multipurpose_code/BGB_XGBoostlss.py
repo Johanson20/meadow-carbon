@@ -5,13 +5,16 @@ Created on Mon Jan 27 14:08:10 2025
 @author: Johanson C. Onyegbula
 """
 
+import pandas as pd
+import numpy as np
+import os
 from xgboostlss.model import *
 from xgboostlss.distributions.Gaussian import *
 from sklearn.model_selection import GroupShuffleSplit
-import pandas as pd
-import numpy as np
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
+os.chdir("Code")    # adjust directory
+
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns

@@ -19,14 +19,14 @@ ee.Initialize()
 
 
 def calculateIndices(image):
-    # calculate and add indices from landsat band values
+    ''' calculate and add indices from landsat band values '''
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
-    ndmi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
-    return image.addBands([ndvi, ndmi])
+    ndwi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDWI')
+    return image.addBands([ndvi, ndwi])
 
 
 def maskCloudAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel; then scale values
+    ''' rename bands and mask out cloud based on bits in QA_pixel; then scale values '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -40,7 +40,7 @@ def maskCloudAndRename(image):
 
 
 def randomPolygonPoint(polygon):
-    # extract coordinate of random point in a polygon (random seed ensures reproducibility) of result
+    ''' extract coordinate of random point in a polygon (random seed ensures reproducibility) of result '''
     np.random.seed(10)
     minx, miny, maxx, maxy = polygon.bounds
     for _ in range(1000):  # Limit retries
@@ -53,7 +53,7 @@ def randomPolygonPoint(polygon):
 
 # read in meadows shapefile and buffer by 1km; relevant datasets are landsat, elevation and flow accumulation data
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 combined_meadows = meadows.union_all()
 # Spatial resolutions: landsat is 30m, flow is 463.83m, elevation is 10.2m 
 landsat9_collection = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
@@ -68,9 +68,7 @@ slopeDem = ee.Terrain.slope(dem)
 slopeDem_11 = ee.Terrain.slope(dem_11)
 
 # initialize dataframe with relevant variables
-meadow_data = pd.DataFrame(columns=['ID', 'Area_m2', 'Longitude', 'Latitude', 'BLue_mean', 'Blue_var', 'Green_mean', 'Green_var',
-                           'NDVI_mean', 'NDVI_var', 'NDMI_mean', 'NDMI_var', 'NIR_mean', 'NIR_var', 'Red_mean', 'Red_var',
-                           'SWIR_1_mean', 'SWIR_1_var', 'SWIR_2_mean', 'SWIR_2_var', 'TPI', 'Flow', 'Slope', 'IsMeadow'])
+meadow_data = pd.DataFrame(columns=['ID', 'Area_m2', 'Longitude', 'Latitude', 'BLue_mean', 'Blue_var', 'Green_mean', 'Green_var', 'NDVI_mean', 'NDVI_var', 'NDWI_mean', 'NDWI_var', 'NIR_mean', 'NIR_var', 'Red_mean', 'Red_var', 'SWIR_1_mean', 'SWIR_1_var', 'SWIR_2_mean', 'SWIR_2_var', 'TPI', 'Flow', 'Slope', 'IsMeadow'])
 
 # iterate through each meadow: extract centroid's values and random non-meadow point
 for meadowIdx in range(len(meadows)):
@@ -117,7 +115,7 @@ for meadowIdx in range(len(meadows)):
     
     if meadowIdx%20==0: print(meadowIdx, end=" ")
 
-meadow_data.to_csv('csv/Real_and_false_meadows.csv', index=False)
+meadow_data.to_csv('../csv/Real_and_false_meadows.csv', index=False)
 
 
 import geemap
@@ -160,6 +158,6 @@ realMeadows['RFPredictedClass'] = meadow_points.groupby('MeadowId')['RFPredicted
 '''meadow_data.dropna(inplace=True)
 meadow_data.drop_duplicates(inplace=True)
 meadow_data.reset_index(drop=True, inplace=True)'''
-meadow_points.to_file("files/Meadow_Points.shp", driver="ESRI Shapefile")
-realMeadows.to_file("files/PredictedMeadows.shp", driver="ESRI Shapefile")
+meadow_points.to_file("../files/Meadow_Points.shp", driver="ESRI Shapefile")
+realMeadows.to_file("../files/PredictedMeadows.shp", driver="ESRI Shapefile")
 meadows = None

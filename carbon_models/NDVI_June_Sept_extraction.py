@@ -20,7 +20,7 @@ from joblib import Parallel, delayed
 from datetime import datetime
 from shapely.geometry import box
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory suitably (one folder up based on paths of other files being created)
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"
@@ -28,7 +28,7 @@ ee.Initialize()
 
 
 def geotiffToDataFrame(image_name, cols):
-    # creates a dataframe of unique columns (hence combines repeating band names)
+    ''' creates a single dataframe combining both NDVI columns '''
     with rasterio.Env(CPL_LOG='ERROR'):
         geotiff = xr.open_rasterio(image_name)
     df = geotiff.to_dataframe(name='value').reset_index()
@@ -43,7 +43,7 @@ def geotiffToDataFrame(image_name, cols):
 
 
 def processGeotiff(df):
-    # drop null columns and convert infinity to NAs
+    ''' cleans up dataframe: drop null columns and convert infinity to NAs '''
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df = df.groupby(['X', 'Y']).apply(interpolate_pixel_group)
     nan_rows = df[df.isna().any(axis=1)]
@@ -56,12 +56,12 @@ def processGeotiff(df):
 
 
 def interpolate_pixel_group(group):
-    # interpolate NA rows (landsat 7 scan lines) with nearest different date of same pixel
+    ''' interpolate NA rows (landsat 7 scan lines) with nearest different date of same pixel '''
     return group.interpolate(method='linear', axis=0, limit_direction='both')
 
 
 def spatial_interpolate(row, df):
-    # interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date 
+    ''' interpolate NA rows (landsat 7 scan lines) based on median of other pixels on same date '''
     nearest_values = df[(df['Date'] == row['Date']) & ((df['X'] != row['X']) | (df['Y'] != row['Y']))].dropna()
     if not nearest_values.empty:
         row.fillna(nearest_values.median(), inplace=True)
@@ -75,6 +75,7 @@ def spatial_interpolate(row, df):
 
 
 def interpolate_group(group):
+    ''' returns first instance of pixel/group, otherwise deletes the row '''
     try:
         return group.head(1)
     except:
@@ -82,7 +83,7 @@ def interpolate_group(group):
 
 
 def maskAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel; then scale values
+    ''' rename bands and mask out cloud based on bits in QA_pixel; then scale values '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -96,13 +97,13 @@ def maskAndRename(image):
 
 
 def calculateIndices(image):
-    # calculate and add indices from landsat band values
+    ''' calculate and adds NDVI from landsat band values '''
     ndvi = image.normalizedDifference(['NIR', 'Red']).rename('NDVI')
     return image.addBands(ndvi)
 
 
 def loadYearCollection(year):
-    # load GEE data for the relevant year and make folders for each year
+    ''' load temporal GEE data, generally re-used variables for the relevant year and make folders for each year '''
     global start_year, end_year, landsat_5_year, landsat_collection
     start_year, end_year = str(year-1)+"-10-01", str(year)+"-10-01"
     landsat_collection = landsat.filterDate(start_year, end_year)
@@ -111,6 +112,7 @@ def loadYearCollection(year):
 
 
 def downloadImageBands(subregion, imagename, feature, combined_image):
+    ''' downloads multi-band geotiffs directly to local storage '''
     mycrs = feature.epsgCode
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     image_name = f'{imagename}.tif'
@@ -125,7 +127,7 @@ def downloadImageBands(subregion, imagename, feature, combined_image):
 
 
 def generateCombinedImage(shapefile_bbox):
-    # filter for summer and fall and calculate indices
+    ''' combine June and Sept NDVI bands into one multi-band image within meadow's bounds '''
     landsat_5_year = landsat.filterDate(str(int(year)-6)+"-10-01", str(year-1)+"-10-01").filterBounds(shapefile_bbox).map(calculateIndices)
     landsat_June = landsat_5_year.select('NDVI').filter(ee.Filter.calendarRange(6, 6, 'month')).mean()
     landsat_Sept = landsat_5_year.select('NDVI').filter(ee.Filter.calendarRange(9, 9, 'month')).mean()
@@ -154,9 +156,7 @@ minx, miny, maxx, maxy = shapefile.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
 sierra_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
 
-# load all relevant GEE images/collections for both UTM Zones
-# flow_acc_10 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32610", scale=30).select('b1')
-# flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").clip(sierra_zone).resample('bilinear').reproject(crs="EPSG:32611", scale=30).select('b1')
+# load all Landsat images/collections
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 landsat9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
@@ -169,6 +169,7 @@ allIds = shapefile.ID
 
 
 def prepareMeadows(meadowId):
+    ''' function to search GEE dataset and extract NDVI bands, combine them and download geotiffs '''
     try:
         # extract a single meadow and it's geometry bounds; buffer inwards to remove edge effects
         feature = shapefile[shapefile.ID == meadowId].iloc[0]
@@ -188,6 +189,7 @@ def prepareMeadows(meadowId):
 
 
 def processMeadow(meadowId):
+    ''' function to process downloaded geotiffs and save to CSVs '''
     try:
         # check if results already exist
         outputname = f'files/{year}/meadow_{year}_{meadowId}'

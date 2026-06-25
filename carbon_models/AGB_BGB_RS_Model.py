@@ -14,7 +14,7 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-filename = "csv/Belowground Biomass_RS Model.csv"
+filename = "../csv/Belowground Biomass_RS Model.csv"
 # REPEAT same for AGB
 # filename = "csv/Aboveground Biomass_RS Model.csv"
 data = pd.read_csv(filename)
@@ -38,13 +38,14 @@ data['SampleDate'] = [pd.to_datetime(x).strftime("%Y-%m-%d") for x in data['Samp
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
-#ee.Authenticate()
+#ee.Authenticate()      # only ever run once for a new computer/GEE-project setup
 ee.Initialize()
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")   # hide warning messages
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def calculateIndices(image):
-    # normalize raw reflectance values and calculate indices
+    ''' normalize raw reflectance values (using GEE defined scale and offset) and calculate indices '''
     scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
     # add indices
@@ -60,7 +61,7 @@ def calculateIndices(image):
 
 
 def maskCloud(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
+    ''' rename bands and mask out cloud based on bits in QA_pixel '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -72,7 +73,7 @@ def maskCloud(image):
 
 
 def getBandValues(image):
-    # extract band values (with indices) alongside UTM, date and timezone of landsat image
+    ''' extract band values (with indices) alongside UTM, date and timezone of landsat image '''
     image = calculateIndices(image)
     values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
@@ -81,21 +82,21 @@ def getBandValues(image):
 
 
 def gridmetValues(image):
+    ''' extract gridmet values alongside date '''
     values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
     return ee.Feature(None, values).set('Date', date)
 
 
-# get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def extractAllValues(landsat, year):
-    # get band values and ensure it is not null
+    ''' get 5 year averages of band values , number of wet and snow days, as well as integrals over growing season '''
     landsat_values = landsat.map(getBandValues).getInfo()['features']
-    if not landsat_values:
+    if not landsat_values:  # ensure band values are not null
         return [{'Blue': None}, {'Blue': None}, 0, {'Blue': None}, 0, 0]
     start_year, end_year = str(int(year)-1)+"-10-01", str(int(year))+"-10-01"
-    if x >= -120:   # latitudes between 120W and 114W refer to EPSG:32611"
+    if x >= -120:   # latitudes between 120W and 114W refer to EPSG 32611"
         temp_val = gridmet_11.filterBounds(point).filterDate(start_year, end_year)
-    else:
+    else:   # EPSG 32610 for the rest of Sierra Nevada
         temp_val = gridmet.filterBounds(point).filterDate(start_year, end_year)
     gridmet_values = temp_val.map(gridmetValues).getInfo()['features']
     L_values, G_values = [], []
@@ -140,7 +141,7 @@ def extractAllValues(landsat, year):
     return [june_prev_5.mean(), sept_prev_5.mean(), df['UTM'].mode().iloc[0], integrals, no_snow_days, no_wet_days, active_growth_days]
 
 
-# resample images collections whose band values are not 30m for both UTM zones
+# resample images collections whose spatially coarser band values are not 30m for both UTM zones
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -156,14 +157,14 @@ landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsa
 landsat_npp = ee.ImageCollection("UMT/NTSG/v2/LANDSAT/NPP").select('annualNPP')
 modis_npp = ee.ImageCollection("UMT/NTSG/v2/MODIS/NPP") .select('annualNPP').map(resample10)
 modis_npp_11 = ee.ImageCollection("UMT/NTSG/v2/MODIS/NPP") .select('annualNPP').map(resample11)
-# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); gridmet/terraclimate (4,638.3m resolution)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# unify finer resolution to Landsat's 30m in suitable UTM zone: slope and elevation (10.2m resolution); 
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
 
-'''
+'''     # newer way of extracting DEM if above extraction gives warning
 dem = ee.ImageCollection('USGS/3DEP/10m_collection').mosaic().select('elevation')
 dem_11 = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 dem = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
@@ -172,6 +173,7 @@ slopeDem_11 = ee.Terrain.slope(dem_11)
 dem, dem_11 = dem.setDefaultProjection("EPSG:4326"), dem_11.setDefaultProjection("EPSG:4326")
 '''
 
+# extract flow and other datasets: flow accumulation (463.83m resolution); gridmet/terraclimate (4,638.3m resolution)
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['def', 'aet', 'pr', 'swe']).map(resample10)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample10)
@@ -224,6 +226,7 @@ for idx in range(data.shape[0]):
     # next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
     
+    # extract band values based on 5 year range of values as defined in function
     landsat = landsat_collection.filterBounds(point).filterDate(prev_5_year, year+"-10-01")
     bands_June, bands_Sept, utm, integrals, snow_days, wet_days, growth_days = extractAllValues(landsat, year)
     
@@ -341,7 +344,7 @@ for idx in range(data.shape[0]):
     
     if idx%20 == 0: print(idx, end=' ')
 
-# checks if they are all cloud free (should equal data.shape[0])
+# checks how much data was extracted and if they are all cloud free (should equal data.shape[0])
 len([x for x in dNIR if x])
 
 data['NDVI_June'] = NDVI_Summer
@@ -418,10 +421,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 # read csv containing random samples
-data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
-'''data = pd.read_csv("csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
-data = pd.read_csv("csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+'''data = pd.read_csv("../csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
+data = pd.read_csv("../csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
 data['SampleDate'] = pd.to_datetime(data['SampleDate'])
 data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
 # confirm column names first
@@ -450,7 +453,7 @@ for i in range(len(var_col)):
         vals.append(np.corrcoef(data[col1], data[col2])[0][1])
     corr_mat.iloc[i, :] = vals
 corr_mat.index = corr_mat.columns
-corr_mat.to_csv("files/BGB_correlation.csv")
+corr_mat.to_csv("../files/BGB_correlation.csv")
 
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
@@ -466,7 +469,7 @@ data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
-with PdfPages('files/BGB_Scatter_plots.pdf') as pdf:
+with PdfPages('../files/BGB_Scatter_plots.pdf') as pdf:
     col2 = cols[10:]
     for i in range(0, len(col2), 9):
         # Get up to 9 features for this page
@@ -517,7 +520,7 @@ bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
 # Make partial dependence plots (3 by 3 per page)
-with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
+with PdfPages('../files/BGB_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         page_features = var_col[i:i+9]
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
@@ -532,7 +535,7 @@ with PdfPages('files/BGB_partial_dependence_plots.pdf') as pdf:
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
-with PdfPages('files/BGB_1_1_plot.pdf') as pdf:
+with PdfPages('../files/BGB_1_1_plot.pdf') as pdf:
     fig, ax = plt.subplots(figsize=(8, 6))
     y_test_pred = bgb_model.predict(X_test)
     y_test_84_pred = bgb_84_model.predict(X_test)
@@ -574,15 +577,16 @@ sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # write variable importance to csv
 df = pd.DataFrame({"Variable":  np.array(bgb_model.feature_names_in_)[sorted_idx], "Importance":  np.array(bgb_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/BGB_var_importance.csv", index=False)
+df.to_csv("../files/BGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
+    '''Function to generate BGB feature importance bar graph of independent variables'''
     plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
     plt.yticks(pos, np.array(bgb_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotTestY(var):
-    # Make regression line over y_test and it's predictions
+    ''' Make regression line over y_test and plot predicted versus actual data '''
     regressor = LinearRegression()
     test_y = np.array(y_test).reshape(-1,1)
     test_pred_y = np.array(y_test_pred).reshape(-1,1)
@@ -601,7 +605,7 @@ def plotTestY(var):
     plt.legend()
 
 def plotTrainY():
-    # Make regression line over y_train and it's predictions
+    ''' Make regression line over y_train and plot predicted versus actual data '''
     regressor = LinearRegression()
     train_y = np.array(y_train).reshape(-1,1)
     train_pred_y = np.array(y_train_pred).reshape(-1,1)
@@ -626,8 +630,8 @@ np.array(bgb_model.feature_names_in_)[sorted_idx]
 np.array(bgb_model.feature_importances_)[sorted_idx]
 
 # same procedure as above
-data = pd.read_csv("csv/Aboveground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
-# data = pd.read_csv("csv/Aboveground Biomass_RS Model_Data.csv")
+data = pd.read_csv("../csv/Aboveground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
+# data = pd.read_csv("../csv/Aboveground Biomass_RS Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns
@@ -652,7 +656,7 @@ for i in range(len(var_col)):
         vals.append(np.corrcoef(data[col1], data[col2])[0][1])
     corr_mat.iloc[i, :] = vals
 corr_mat.index = corr_mat.columns
-corr_mat.to_csv("files/AGB_correlation.csv")
+corr_mat.to_csv("../files/AGB_correlation.csv")
 
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
@@ -665,7 +669,7 @@ data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
-with PdfPages('files/AGB_Scatter_plots.pdf') as pdf:
+with PdfPages('../files/AGB_Scatter_plots.pdf') as pdf:
     col2 = cols[17:-8]
     for i in range(0, len(col2), 9):
         # Get up to 9 features for this page
@@ -709,7 +713,7 @@ agb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
 # Make partial dependence plots (3 by 3 per page)
-with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
+with PdfPages('../files/AGB_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         page_features = var_col[i:i+9]
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
@@ -724,7 +728,7 @@ with PdfPages('files/AGB_partial_dependence_plots.pdf') as pdf:
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
-with PdfPages('files/AGB_1_1_plot.pdf') as pdf:
+with PdfPages('../files/AGB_1_1_plot.pdf') as pdf:
     fig, ax = plt.subplots(figsize=(8, 6))
     y_test_pred = agb_model.predict(X_test)
     y_test_84_pred = agb_84_model.predict(X_test)
@@ -766,9 +770,10 @@ sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # write variable importance to csv
 df = pd.DataFrame({"Variable":  np.array(agb_model.feature_names_in_)[sorted_idx], "Importance":  np.array(agb_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/AGB_var_importance.csv", index=False)
+df.to_csv("../files/AGB_var_importance.csv", index=False)
 
 def plotFeatureImportance():
+    '''Function to generate AGB feature importance bar graph of independent variables'''
     plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
     plt.yticks(pos, np.array(agb_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
@@ -780,7 +785,8 @@ np.array(agb_model.feature_names_in_)[sorted_idx]
 np.array(agb_model.feature_importances_)[sorted_idx]
 
 
-with open('files/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
+# save models for future use
+with open('../files/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
-with open('files/carbon_sd_models.pckl', 'wb') as f:
+with open('../files/carbon_sd_models.pckl', 'wb') as f:
     pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)

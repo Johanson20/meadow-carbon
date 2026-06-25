@@ -13,11 +13,11 @@ import pandas as pd
 import numpy as np
 from joblib import Parallel, delayed
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"      # adjust directory
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-filename = "csv/Soil Carbon_RS Model.csv"
+filename = "../csv/Soil Carbon_RS Model.csv"
 data = pd.read_csv(filename)
 data.head()
 data.drop_duplicates(inplace=True)  # remove duplicate rows
@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore")
 
 
 def calculateIndices(image):
-    # normalize raw reflectance values
+    ''' normalize raw reflectance values (using GEE defined scale and offset) and calculate indices '''
     scaled_bands = image.select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2']).multiply(2.75e-05).add(-0.2)
     image = image.addBands(scaled_bands, overwrite=True)
     
@@ -59,7 +59,7 @@ def calculateIndices(image):
 
 
 def maskCloud(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
+    ''' rename bands and mask out cloud based on bits in QA_pixel '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -71,21 +71,22 @@ def maskCloud(image):
 
 
 def getBandValues(image):
-    # extract band values (with indices)
+    ''' extract band values (with indices) alongside date and timezone of landsat image '''
     image = calculateIndices(image)
     values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
     return ee.Feature(None, values).set('Date', date)
 
 
-def gridmetValues(image):   # same as getBandValues (without indices: for non-Landsat datasets)
+def gridmetValues(image):
+    ''' extract gridmet values alongside date '''
     values = image.reduceRegion(reducer=ee.Reducer.mean(), geometry=point, scale=30)
     date = image.date().format('YYYY-MM-dd')
     return ee.Feature(None, values).set('Date', date)
 
 
-# get band values at peak EVI date, number of wet and snow days, as well as integrals over growing season
 def extractActiveGrowth(landsat, target_date):
+    ''' get 5 year averages of band values , number of wet and snow days, as well as integrals over growing season '''
     # extract previous 5 years of Landsat and Gridmet band values, and ensure it is not null
     year, month, day = target_date.split("-")
     prev_5_year = f"{str(int(year)-5)}-{month}-{day}"
@@ -134,7 +135,7 @@ def extractActiveGrowth(landsat, target_date):
     return [integrals[:13], round(active_growth_days)]
 
 
-# resample datasets for UTM Zone 10 and 11 which cover Sierra Nevada
+# # resample images collections whose spatially coarser band values are not 30m for both UTM zones datasets
 def resample10(image):
     return image.resample("bilinear").reproject(crs="EPSG:32610", scale=30)
 
@@ -142,7 +143,7 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-# reads Landsat data, flow accumulation, daymet, terraclimate and DEM data (for slope and elevation)
+# reads Landsat data, daymet, terraclimate and DEM data (for slope and elevation)
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
@@ -155,11 +156,6 @@ dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.
 slopeDem = ee.Terrain.slope(dem)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['aet', 'pr', 'swe']).map(resample10)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample10)
-
-dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
-slopeDem_11 = ee.Terrain.slope(dem_11)
-terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['aet', 'pr', 'swe']).map(resample11)
-gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample11)
 
 # these polaris soil datasets have 30m spatial resolution (same as landsat above); lithology is 90m resolution
 perc_clay = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample10)
@@ -174,6 +170,12 @@ shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_perc_sand = ee.ImageCollection(perc_sand.toList(3)).mean()
 deep_perc_sand = ee.Image(perc_sand.toList(6).get(3))
+
+# same as above data but for EPSG zone 32611
+dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
+slopeDem_11 = ee.Terrain.slope(dem_11)
+terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select(['aet', 'pr', 'swe']).map(resample11)
+gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx', 'srad']).map(resample11)
 
 perc_clay_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/clay_mean').select("b1").map(resample11)
 hydra_cond_11 = ee.ImageCollection('projects/sat-io/open-datasets/polaris/ksat_mean').select("b1").map(resample11)
@@ -282,7 +284,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 # read csv containing random samples and model soil carbon
-data = pd.read_csv('csv/Soil Carbon_RS Model_Data.csv')
+data = pd.read_csv('../csv/Soil Carbon_RS Model_Data.csv')
 data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -308,7 +310,7 @@ for i in range(len(var_col)):
         vals.append(np.corrcoef(data[col1], data[col2])[0][1])
     corr_mat.iloc[i, :] = vals
 corr_mat.index = corr_mat.columns
-corr_mat.to_csv("files/Soil_carbon_correlation.csv")
+corr_mat.to_csv("../files/Soil_carbon_correlation.csv")
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
@@ -317,7 +319,7 @@ data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
-with PdfPages('files/SoilC_Scatter_plots.pdf') as pdf:
+with PdfPages('../files/SoilC_Scatter_plots.pdf') as pdf:
     col2 = cols[10:]
     for i in range(0, len(col2), 9):
         # Get up to 9 features for this page
@@ -359,7 +361,7 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 soilc_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=9, n_estimators=25, subsample=0.6, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 soilc_model.fit(X_train, y_train)
 # Make partial dependence plots
-with PdfPages('files/SoilC_partial_dependence_plots.pdf') as pdf:
+with PdfPages('../files/SoilC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         page_features = var_col[i:i+9]
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
@@ -406,7 +408,7 @@ sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # write variable importance to csv
 df = pd.DataFrame({"Variable":  np.array(soilc_model.feature_names_in_)[sorted_idx], "Importance":  np.array(soilc_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/SoilC_var_importance.csv", index=False)
+df.to_csv("../files/SoilC_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)
@@ -415,11 +417,13 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
+    '''Function to generate soil carbon model's feature importance bar graph of independent variables'''
     plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
     plt.yticks(pos, np.array(soilc_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotTestY(var):
+    ''' Make regression line over y_test and plot predicted versus actual data '''
     plt.scatter(y_test, y_test_pred, color='g')
     plt.plot(y_test, y_pred, color='k', label='Regression line')
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')
@@ -438,7 +442,7 @@ np.array(soilc_model.feature_names_in_)[sorted_idx]
 np.array(soilc_model.feature_importances_)[sorted_idx]
 
 # read csv containing random samples and model percent carbon
-data = pd.read_csv('csv/Soil Carbon_RS Model_Data.csv')
+data = pd.read_csv('../csv/Soil Carbon_RS Model_Data.csv')
 data.head()
 cols = data.columns
 # cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column
@@ -464,7 +468,7 @@ for i in range(len(var_col)):
         vals.append(np.corrcoef(data[col1], data[col2])[0][1])
     corr_mat.iloc[i, :] = vals
 corr_mat.index = corr_mat.columns
-corr_mat.to_csv("files/Percent_carbon_correlation.csv")
+corr_mat.to_csv("../files/Percent_carbon_correlation.csv")
 
 # if NAs where found (results above are not 0) in one of them (e.g. Y)
 nullIds = list(np.where(subdata[y_field].isnull())[0])    # null IDs
@@ -473,7 +477,7 @@ data.dropna(subset=[y_field], inplace=True)
 data.dropna(subset=var_col, inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots of relevant variables from raw dataframe
-with PdfPages('files/PercentC_Scatter_plots.pdf') as pdf:
+with PdfPages('../files/PercentC_Scatter_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         # Get up to 9 features for this page
         page_features = var_col[i:i+9]
@@ -514,7 +518,7 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 percentc_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=8, n_estimators=50, subsample=0.3, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 percentc_model.fit(X_train, y_train)
 # Make partial dependence plots
-with PdfPages('files/PercentC_partial_dependence_plots.pdf') as pdf:
+with PdfPages('../files/PercentC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         page_features = var_col[i:i+9]
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
@@ -561,7 +565,7 @@ sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # write variable importance to csv
 df = pd.DataFrame({"Variable":  np.array(percentc_model.feature_names_in_)[sorted_idx], "Importance":  np.array(percentc_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/PercentC_var_importance.csv", index=False)
+df.to_csv("../files/PercentC_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)
@@ -570,6 +574,7 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
+    '''Function to generate percentage carbon model's feature importance bar graph of independent variables'''
     plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
     plt.yticks(pos, np.array(percentc_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
@@ -579,5 +584,5 @@ plotTestY("Percentage Carbon")
 np.array(percentc_model.feature_names_in_)[sorted_idx]
 np.array(percentc_model.feature_importances_)[sorted_idx]
 
-with open('files/bgb_soil_models.pckl', 'wb') as f:
+with open('../files/bgb_soil_models.pckl', 'wb') as f:
     pickle.dump([percentc_model, soilc_model], f)

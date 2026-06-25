@@ -23,7 +23,7 @@ def resample11(image):
     return image.resample("bilinear").reproject(crs="EPSG:32611", scale=30)
 
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_Data.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")
 data.head()
 
 # load relevant polaris datasets of UTM Zone 10 and extract each of the first unique 4 depths
@@ -84,8 +84,8 @@ for idx in range(data.shape[0]):
     year, month, day = target_date.split("-")
     next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     
-    # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
-    if x >= -120:   # corresponds to zone 32611
+    # compute band values(spatial resolution is 30m)
+    if x >= -120:   # corresponds to EPSG zone 32611
         l1_clay = l1_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l2_clay = l2_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_clay = l3_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -102,7 +102,7 @@ for idx in range(data.shape[0]):
         l2_organic = l2_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_organic = l3_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l4_organic = l4_organic_m_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
-    else:   # zone 32610
+    else:   # EPSG zone 32610
         l1_clay = l1_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l2_clay = l2_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         l3_clay = l3_perc_clay.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -156,7 +156,7 @@ data['L2_Organic_Matter'] = L2_Org
 data['L3_Organic_Matter'] = L3_Org
 data['L4_Organic_Matter'] = L4_Org
 
-data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)
+data.to_csv("../files/Belowground Biomass_RS Model_Data.csv", index=False)
 
 
 # Another extraction (depth classes of polaris soil averaged for first 3; 4th depth used alone)
@@ -197,7 +197,7 @@ for idx in range(data.shape[0]):
     year, month, day = target_date.split("-")
     next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     
-    # compute values from daymetv4 (1km resolution) and gridmet/terraclimate (resolution of both is 4,638.3m)
+    # compute band values (spatial resolution is 30m)
     if x >= -120:   # zone 32611
         shallow_clay = shallow_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
         deep_clay = deep_perc_clay_11.reduceRegion(ee.Reducer.mean(), point, 30).getInfo()['b1']
@@ -225,4 +225,4 @@ data['Shallow_Hydra_Conduc'] = Shallow_Hydra
 data['Deep_Hydra_Conduc'] = Deep_Hydra
 data['Organic_Matter'] = Organic
 
-data.to_csv("files/Belowground Biomass_RS Model_Data.csv", index=False)
+data.to_csv("../files/Belowground Biomass_RS Model_Data.csv", index=False)

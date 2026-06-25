@@ -13,7 +13,7 @@ import arcpy
 # arcpy is accessible through any python IDLE/console under ArcGIS Pro in the start menu apps (after installation)
 
 # Set working directory to folder containing GDB
-mydir = "C:/Users/jonyegbula/Documents/ArcGIS/Projects/HydroDEM"
+mydir = "ArcGIS/Projects/HydroDEM"     # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 

@@ -2,7 +2,7 @@
 """
 Created on Mon Dec  8 15:09:32 2025
 
-@author: Johanson C. Onyegbula (johansononyegbula20@gmail.com)
+@author: Johanson C. Onyegbula
 """
 
 import os
@@ -14,14 +14,14 @@ import ee
 from shapely.geometry import box
 from joblib import Parallel, delayed
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 ee.Initialize()
 
 
-# rename bands and mask out cloud based on bits in QA_pixel; then scale values
 def maskAndRename(image):
+    ''' rename bands and mask out cloud based on bits in QA_pixel; then scale values '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -36,8 +36,8 @@ def maskAndRename(image):
     return image.addBands(scaled_bands, overwrite=True)
 
 
-# calculate and add indices from landsat band values, and return only indices
 def calculateIndices(image):
+    ''' calculate and add indices from landsat band values, and return only indices '''
     ndmi = image.normalizedDifference(['NIR', 'SWIR_1']).rename('NDMI')
     ndwi = image.normalizedDifference(['Green', 'NIR']).rename('NDWI')
     evi = image.expression("2.5 * ((NIR - RED) / (NIR + 6*RED - 7.5*BLUE + 1))", {'NIR': image.select('NIR'), 'RED': image.select('Red'), 'BLUE': image.select('Blue')}).rename('EVI')
@@ -48,11 +48,11 @@ def calculateIndices(image):
     return image.select(["NDMI", "EVI", "BSI", "SAVI", "NDWI"])
 
 
-# Function to extract cloud free band values per pixel from landsat 8 or landsat 7
 def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
+    ''' filter landsat images by location and dates about specified day radius and sort by proximity to sample date '''
     year, month, day = target_date.split("-")
-    # Calculates absolute time difference (in days) from a target date, in which the images are acquired
     def calculate_time_difference(image):
+        ''' Calculates absolute time difference of a landsat image and a target date (in days) '''
         time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
         return image.set('time_difference', time_difference)
     try:
@@ -85,7 +85,7 @@ def getBandValues(shapefile_bbox, target_date, bufferDays = 30):
 
 # read meadow data and extract entire boundary for filtering GEE images
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/meadows_dateBeforeFire_fires2012to2023_20251210.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("../files/meadows_dateBeforeFire_fires2012to2023_20251210.shp").to_crs(epsg_crs)
 minx, miny, maxx, maxy = meadows.total_bounds
 merged_zones = gpd.GeoDataFrame([1], geometry=[box(minx, miny, maxx, maxy)], crs=epsg_crs)
 meadow_zone = ee.Geometry.Polygon(list(merged_zones.geometry[0].exterior.coords)).buffer(100)
@@ -147,7 +147,7 @@ for idx in range(len(results)):
 meadow_data[['ANPP_mean', 'ANPP_std']] = [None, None]
 my_year = str(meadows.DtFire[0].year)
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
-data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv")
+data = pd.read_csv(f"../files/results/{my_year}_Meadow_flux.csv")
 # spatial join between each pixel of csv and meadow's geometry
 pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
@@ -166,7 +166,7 @@ for meadowIdx in range(meadow_data.shape[0]):
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
     if year != my_year:
         my_year = year
-        data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv")
+        data = pd.read_csv(f"../files/results/{my_year}_Meadow_flux.csv")
         pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')['ANPP'].agg(['mean', 'std'])
@@ -188,12 +188,12 @@ meadow_data.sort_values(by="UniqueID", inplace=True)
 meadow_data.reset_index(drop=True, inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
-meadow_data.to_csv("csv/fire_meadows_data.csv", index=False)
+meadow_data.to_csv("../csv/fire_meadows_data.csv", index=False)
 
 
 # read meadow data for fires between 1984 and 2025 and extract NEP related variables
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/meadowsFiresCombos_1984to2024_20251208.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("../files/meadowsFiresCombos_1984to2024_20251208.shp").to_crs(epsg_crs)
 meadows = meadows[meadows.rltnshp != "within_100m"]
 # sort the meadows by fire year
 meadows.sort_values(by="YEAR_", inplace=True)
@@ -207,7 +207,7 @@ meadow_data = pd.DataFrame(index=np.arange(meadows.shape[0]), columns=['UniqueID
 my_year = meadows.YEAR_[0]
 meadows_geom = gpd.GeoDataFrame(geometry=meadows.geometry, crs=epsg_crs)
 mycols = ['X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP']
-data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
+data = pd.read_csv(f"../files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
 # spatial join between each pixel of csv and meadow's geometry
 pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
 joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
@@ -219,7 +219,7 @@ for meadowIdx in range(meadows.shape[0]):
     # read a new pixel level csv file when the next year is encountered (saves computational cost)
     if year != my_year:
         my_year = year
-        data = pd.read_csv(f"files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
+        data = pd.read_csv(f"../files/results/{my_year}_Meadow_flux.csv", usecols=mycols)
         pixels_gdf = gpd.GeoDataFrame(data, geometry=gpd.points_from_xy(data.X, data.Y), crs=epsg_crs)    
         joined = gpd.sjoin(pixels_gdf, meadows_geom, how='inner', predicate='within')
         stats = joined.groupby('index_right')[mycols[2:]].agg(['mean', 'std'])
@@ -241,4 +241,4 @@ meadow_data.drop(nullIds, inplace = True)
 meadow_data.reset_index(drop=True, inplace=True)
 meadow_data.head()
 # write updated dataframe to new csv file
-meadow_data.to_csv("csv/burned_meadows_1984_2025.csv", index=False)
+meadow_data.to_csv("../csv/burned_meadows_1984_2025.csv", index=False)

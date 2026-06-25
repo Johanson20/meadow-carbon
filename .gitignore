@@ -2,6 +2,7 @@ appdir/
 client_secrets.json
 desktop.ini
 files/
-special-code/.ipynb_checkpoints/
+multipurpose_code/.ipynb_checkpoints/
+false_meadow_identity/.ipynb_checkpoints/
 mycreds.txt
 .Rhistory

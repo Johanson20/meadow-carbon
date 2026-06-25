@@ -11,7 +11,7 @@ from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifi
 from sklearn.metrics import mean_squared_error
 from joblib import Parallel, delayed
 
-# define "grid values" of hyperparameters for iterative optimization
+# define "grid step values" of hyperparameters for iterative optimization
 parameters = {'subsample': [x/100 for x in range(30, 101, 10)], 'max_depth': range(3,15)}
 learning_rate = [0.01,0.02,0.03,0.05,0.07,0.08,0.1,0.13,0.16,0.2,0.25,0.3,0.35]
 n_estimators = [25,50,75,100,125,150,200,250,500,750,1000,2000,2500,5000]

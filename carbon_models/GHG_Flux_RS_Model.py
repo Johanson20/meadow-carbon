@@ -13,7 +13,7 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-filename = "csv/GHG Flux_RS Model.csv"
+filename = "../csv/GHG Flux_RS Model.csv"
 data = pd.read_csv(filename)
 data.head()
 '''
@@ -35,10 +35,12 @@ data.head()
 # Authenticate and Initialize the Earth Engine API
 #ee.Authenticate()
 ee.Initialize()
+warnings.filterwarnings("ignore")   # hide warning messages
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def maskAndRename(image):
-    # rename bands and mask out cloud based on bits in QA_pixel
+    ''' rename bands and mask out cloud based on bits in QA_pixel '''
     image = image.rename(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2', 'QA'])
     qa = image.select('QA')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
@@ -49,15 +51,15 @@ def maskAndRename(image):
     return image.updateMask(cloud_mask).select(['Blue', 'Green', 'Red', 'NIR', 'SWIR_1', 'SWIR_2'])
 
 
-# Calculates absolute time difference of a landsat image and a target date (in days)
 def calculate_time_difference(image):
+    ''' Calculates absolute time difference of a landsat image and a target date (in days) '''
     time_difference = ee.Number(image.date().difference(target_date, 'day')).abs()
     return image.set('time_difference', time_difference)
 
 
 # Function to extract cloud free band values per pixel from landsat
 def getBandValues(landsat_collection, point, target_date, bufferDays = 60):
-    # filter landsat images by location and dates about 60 day radius and sort by proximity to sample date
+    ''' filter landsat images by location and dates about specified day radius and sort by proximity to sample date '''
     spatial_filtered = landsat_collection.filterBounds(point)
     temporal_filtered = spatial_filtered.filterDate(ee.Date(target_date).advance(-bufferDays, 'day'), ee.Date(target_date).advance(bufferDays, 'day'))
     # Map the ImageCollection over time difference and sort to get image of closest date
@@ -90,13 +92,14 @@ def resample11(image):
 landsat9_collection = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2').select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").select(['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL'])
 landsat7_collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').select(['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'])
-# flow accumulation (463.83m resolution); slope and elevation (10.2m resolution); gridmet/terraclimate (4,638.3m resolution)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskAndRename)
+
+# unify finer resolution to Landsat's 30m in suitable UTM zone: slope and elevation (10.2m resolution); 
 dem = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
 slopeDem = ee.Terrain.slope(dem)
 dem_11 = ee.Image('USGS/3DEP/10m').select('elevation').reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 slopeDem_11 = ee.Terrain.slope(dem_11)
-'''
+'''     # newer way of extracting DEM if above extraction gives warning
 dem = ee.ImageCollection('USGS/3DEP/10m_collection').mosaic().select('elevation')
 dem_11 = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32611", scale=30)
 dem = dem.reduceResolution(ee.Reducer.mean(), maxPixels=65536).reproject(crs="EPSG:32610", scale=30)
@@ -104,6 +107,8 @@ slopeDem = ee.Terrain.slope(dem)
 slopeDem_11 = ee.Terrain.slope(dem_11)
 dem, dem_11 = dem.setDefaultProjection("EPSG:4326"), dem_11.setDefaultProjection("EPSG:4326")
 '''
+
+# extract flow and other datasets: flow accumulation (463.83m resolution); gridmet/terraclimate (4,638.3m resolution)
 flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear').reproject(crs="EPSG:32610", scale=30)
 gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample10)
 terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet').map(resample10)
@@ -111,7 +116,6 @@ flow_acc_11 = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').resample('bilinear')
 gridmet_11 = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").select(['tmmn', 'tmmx']).map(resample11)
 terraclimate_11 = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").select('aet').map(resample11)
 
-landsat_collection = landsat9_collection.merge(landsat8_collection).merge(landsat7_collection).map(maskAndRename)
 # define arrays to store band values and landsat information
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation, driver, time_diff = [], [], [], [], []
@@ -156,7 +160,7 @@ for idx in range(data.shape[0]):
     tmin = temperature_values['tmmn']
     tmax = temperature_values['tmmx']
     
-    # append vaues to different lists
+    # append vaues to different lists and scale values
     Blue.append(band_values['Blue']*2.75e-05 - 0.2)
     Green.append(band_values['Green']*2.75e-05 - 0.2)
     Red.append(band_values['Red']*2.75e-05 - 0.2)
@@ -174,7 +178,6 @@ for idx in range(data.shape[0]):
     et.append(0.1*aet)
 
     if idx%100 == 0: print(idx, end=' ')
-
 
 data['Blue'] = Blue
 data['Green'] = Green
@@ -209,7 +212,7 @@ data.reset_index(drop=True, inplace=True)
 data.head()
 
 # write updated dataframe to new csv file
-data.to_csv('csv/GHG_Flux_RS_Model_Data.csv', index=False)
+data.to_csv('../csv/GHG_Flux_RS_Model_Data.csv', index=False)
 
 
 # ML training starts here
@@ -226,7 +229,7 @@ from scipy.stats import randint, uniform
 import numpy as np
 
 # read csv containing random samples
-data = pd.read_csv("csv/GHG_Flux_RS_Model_Data.csv")
+data = pd.read_csv("../csv/GHG_Flux_RS_Model_Data.csv")
 data.head()
 # confirm column names first
 cols = data.columns
@@ -249,7 +252,7 @@ for i in range(len(var_col)):
         vals.append(np.corrcoef(data[col1], data[col2])[0][1])
     corr_mat.iloc[i, :] = vals
 corr_mat.index = corr_mat.columns
-corr_mat.to_csv("files/GHG_correlation.csv")
+corr_mat.to_csv("../files/GHG_correlation.csv")
 
 # check for missing/null values across columns and rows respectively (ideal results are typically 0)
 sum(subdata.isnull().any(axis=0) == True)
@@ -264,7 +267,7 @@ data.drop(nullIds, inplace = True)
 data.dropna(subset=[y_field], inplace=True)
 data.reset_index(drop=True, inplace=True)
 # make scatter plots (3 by 3 per page) of relevant variables from raw dataframe
-with PdfPages('files/GHG_Scatter_plots.pdf') as pdf:
+with PdfPages('../files/GHG_Scatter_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         # Get up to 9 features for this page
         page_features = var_col[i:i+9]
@@ -329,7 +332,7 @@ ghg_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)
 # Make partial dependence plots (3 by 3 per page)
-with PdfPages('files/GHG_partial_dependence_plots.pdf') as pdf:
+with PdfPages('../files/GHG_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
         page_features = var_col[i:i+9]
         fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(11, 8.5))
@@ -344,7 +347,7 @@ with PdfPages('files/GHG_partial_dependence_plots.pdf') as pdf:
         fig.tight_layout()
         pdf.savefig(fig)
         plt.close(fig)
-with PdfPages('files/GHG_1_1_plot.pdf') as pdf:
+with PdfPages('../files/GHG_1_1_plot.pdf') as pdf:
     fig, ax = plt.subplots(figsize=(8, 6))
     y_test_pred = ghg_model.predict(X_test)
     y_test_84_pred = ghg_84_model.predict(X_test)
@@ -386,7 +389,7 @@ sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
 # write variable importance to csv
 df = pd.DataFrame({"Variable":  np.array(ghg_model.feature_names_in_)[sorted_idx], "Importance":  np.array(ghg_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/GHG_var_importance.csv", index=False)
+df.to_csv("../files/GHG_var_importance.csv", index=False)
 # Make regression line over y_test and it's predictions
 regressor = LinearRegression()
 y_test = np.array(y_test).reshape(-1,1)
@@ -395,11 +398,13 @@ regressor.fit(y_test, y_test_pred)
 y_pred = regressor.predict(y_test)
 
 def plotFeatureImportance():
+    '''Function to generate GHG feature importance bar graph of independent variables'''
     plt.barh(pos, feat_imp[sorted_idx], align="center", height=0.2)
     plt.yticks(pos, np.array(ghg_model.feature_names_in_)[sorted_idx], fontsize=8, fontweight="bold", linespacing=1.5, fontname="Verdana")
     plt.title("Feature Importance")
 
 def plotY():
+    ''' Make regression line over y_test and plot predicted versus actual data '''
     plt.scatter(y_test, y_test_pred, color='g')
     plt.plot(y_test, y_pred, color='k', label='Regression line')
     plt.plot(y_test, y_test, linestyle='dotted', color='gray', label='1:1 line')

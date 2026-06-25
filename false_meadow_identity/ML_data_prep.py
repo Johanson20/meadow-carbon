@@ -9,7 +9,7 @@ import geopandas as gpd
 os.chdir("Code")    # change path to where github code is pulled from
 
 # read in landsat/flow data for all 18,144 meadows
-df = pd.read_csv("csv/Real_and_false_meadows.csv")
+df = pd.read_csv("../csv/Real_and_false_meadows.csv")
 df.dropna(inplace=True)
 df.drop_duplicates(inplace=True)
 df.reset_index(drop=True, inplace=True)
@@ -49,7 +49,7 @@ high_lat_high_NIR = high_NIR[high_NIR['Latitude'] > l2+2*step].sample(n=200)
 frames = [low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, mid_lat_mid_NIR, 
           high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
 data = pd.concat(frames)
-data.to_csv('csv/meadow_ID_training_data.csv', index=False)
+data.to_csv('../csv/meadow_ID_training_data.csv', index=False)
 
 
 # import relevant ML modules and classes
@@ -62,8 +62,8 @@ import numpy as np
 
 # read csv containing random samples
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
-data = pd.read_csv("csv/meadow_ID_training_data.csv")
+meadows = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+data = pd.read_csv("../csv/meadow_ID_training_data.csv")
 cols = data.columns
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in cols if c not in ['ID', 'Area_m2', 'Longitude', 'Latitude', 'IsMeadow']]
@@ -116,7 +116,7 @@ df['MeadowProb'] = np.round(gbm_model.predict_proba(df.loc[:, var_col])[:, 1], 5
 # extract probability vectors for real meadows (non-zero area in square meters)
 realMeadows = meadows[meadows['ID'].isin(set(df[df['Area_m2'] > 0]['ID']))]
 realMeadows['MeadowProb'] = np.round(gbm_model.predict_proba(df[df.Area_m2 > 0].loc[:, var_col])[:, 1], 5)
-realMeadows.to_file("files/MeadowsProbability.shp", driver="ESRI Shapefile")
+realMeadows.to_file("../files/MeadowsProbability.shp", driver="ESRI Shapefile")
 meadows = None
 
 # assign 1 to "Yes" and "No" to 0 (most "Yes" have prob > 0.67 in training) on test data
@@ -141,7 +141,7 @@ print(conf_matrix)
 
 
 # read in meadow data again without NaNs
-df = pd.read_csv("csv/All_meadows_2022.csv").dropna()
+df = pd.read_csv("../csv/All_meadows_2022.csv").dropna()
 # drop columns without landsat data and run predictions
 X_vars = df.loc[:, var_col]
 meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]
@@ -188,12 +188,12 @@ high_lat_high_NIR = high_NIR[high_NIR['Latitude'] > l2+2*step].sample(11)
 frames = [data, low_lat_low_NIR, mid_lat_low_NIR, high_lat_low_NIR, low_lat_mid_NIR, mid_lat_mid_NIR, 
           high_lat_mid_NIR, low_lat_high_NIR, mid_lat_high_NIR, high_lat_high_NIR]
 newdf = pd.concat(frames).drop_duplicates(subset=['ID'])
-newdf.to_csv('csv/new_training_and_test_data.csv', index=False)
+newdf.to_csv('../csv/new_training_and_test_data.csv', index=False)
 
 
 
 # re-run ML for 180 samples
-data = pd.read_csv("csv/new_training_and_test_data.csv")
+data = pd.read_csv("../csv/new_training_and_test_data.csv")
 data.head()
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in data if c not in ['ID', 'Longitude', 'Latitude', 'QA_PIXEL_mean', 'QA_PIXEL_variance', 'IsMeadow']]
@@ -233,13 +233,13 @@ for i, x in enumerate(y_test):
     print(x, y_test_pred[i])
 
 # read in meadow data again without NaNs
-df = pd.read_csv("csv/All_meadows_2022.csv").dropna()
+df = pd.read_csv("../csv/All_meadows_2022.csv").dropna()
 # drop columns without landsat data and run predictions
 X_vars = df.loc[:, var_col]
 meadow_pred = gbm_model.predict_proba(X_vars)[:, 1]
 df['meadow_pred'] = meadow_pred
 for threshold in [0.5, 0.6, 0.67]:
-    name = 'csv/False_meadow_threshold_' + str(threshold) + ".csv"
+    name = '../csv/False_meadow_threshold_' + str(threshold) + ".csv"
     noMeadows = df.loc[df['meadow_pred'] < threshold]
     noMeadows.to_csv(name, index=False)
     print("Number of False meadows at threshold =", threshold, ":", noMeadows.shape[0])

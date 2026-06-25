@@ -15,7 +15,7 @@ from datetime import datetime
 from matplotlib.backends.backend_pdf import PdfPages
 from joblib import Parallel, delayed
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
@@ -55,12 +55,12 @@ def check5YearRange(fireIncident):
 
 # load shapefile of burn summaries and csv file of burned meadows (entirely within) already generated
 epsg_crs = "EPSG:4326"
-meadows = gpd.read_file("files/meadowsFiresCombos_1984to2024_20251208.shp").to_crs(epsg_crs)
+meadows = gpd.read_file("../files/meadowsFiresCombos_1984to2024_20251208.shp").to_crs(epsg_crs)
 meadows = meadows[meadows.rltnshp == "entirely_within"]
 meadows.drop_duplicates(subset=['UniquID', 'YEAR_'], inplace=True)
 meadows.sort_values(by="YEAR_", inplace=True)
 meadows.reset_index(drop=True, inplace=True)
-data = pd.read_csv("csv/burned_meadows_1984_2025.csv")
+data = pd.read_csv("../csv/burned_meadows_1984_2025.csv")
 data = data[data.Description == "entirely_within"]
 data.drop_duplicates(subset=['UniqueID', 'FireYear'], inplace=True)
 data.reset_index(drop=True, inplace=True)
@@ -78,11 +78,12 @@ meadow_data = pd.DataFrame(columns=all_cols)
 
 allyears = {}
 for yr in years:
-    allyears[yr] = pd.read_csv(f"files/results/{yr}_Meadows.csv")
+    allyears[yr] = pd.read_csv(f"../files/results/{yr}_Meadow_flux.csv")
     print(yr, end=' ')
 
 
 def generateFireTimeSeries(uniqueId):
+    ''' Generates time series plot of burned meadow from 1984 to 2025 and denote fire date '''
     # for each unique ID, extract the feature and geometry
     fireIncident = data[data.UniqueID == uniqueId]
     meadow = meadows[meadows.UniquID == uniqueId].iloc[0]
@@ -118,7 +119,7 @@ def generateFireTimeSeries(uniqueId):
             fire = fireIncident.iloc[idx]
             ans.append([meadow.UniquID, meadow.CalFrID, fire.Description, fire.FireYear])
         # write plots to a pdf
-        with PdfPages(f"files/fire/{uniqueId}_fire_timeseries.pdf") as pdf:
+        with PdfPages(f"../files/fire/{uniqueId}_fire_timeseries.pdf") as pdf:
             for col in cols: 
                 # extract fire dates for feature geometry for determining date range of timeseries analysis
                 target_dates = iter([yr for yr in fireIncident.FireYear])
@@ -171,6 +172,7 @@ def generateFireTimeSeries(uniqueId):
 
 
 def generate_5_Year_TimeSeries(uniqueId):
+    ''' Generates time series plot of burned meadows about 5-year radius based on fire date '''
     ans = []    # final result/row(s) to be returned
     # for each unique ID, extract the feature and geometry
     fireIncident = data[data.UniqueID == uniqueId]
@@ -218,7 +220,7 @@ def generate_5_Year_TimeSeries(uniqueId):
             fire = fireIncident.iloc[idx]
             ans.append([meadow.UniquID, meadow.CalFrID, fire.Description, fire.FireYear])
         # write plots to a pdf
-        with PdfPages(f"files/fire/{uniqueId}_5year_timeseries.pdf") as pdf:
+        with PdfPages(f"../files/fire/{uniqueId}_5year_timeseries.pdf") as pdf:
             for col in cols: 
                 # extract fire dates for feature geometry for determining date range of timeseries analysis
                 target_dates = iter([yr for yr in fireIncident.FireYear])
@@ -294,5 +296,5 @@ for idx in range(len(results)):
             if len(res) > 4: meadow_data.loc[len(meadow_data)] = res
     else:
         if result and len(result[0]) > 4: meadow_data.loc[len(meadow_data)] = result[0]
-# meadow_data.to_csv("csv/burned_meadows_statistics.csv", index=False)
-meadow_data.to_csv("csv/burned_meadows_5_year_stats.csv", index=False)
+# meadow_data.to_csv("../csv/burned_meadows_statistics.csv", index=False)
+meadow_data.to_csv("../csv/burned_meadows_5_year_stats.csv", index=False)

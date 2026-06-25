@@ -13,7 +13,7 @@ from affine import Affine
 from pysheds.grid import Grid
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # Function to map geographic coordinates to grid indices
@@ -24,9 +24,9 @@ def map_to_pixels(x, y, grid_bounds, cellsize):
 
 # read in shapefile, the hydroshed DEM and adjust flats and depressions
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
-grid = Grid.from_raster('files/sierra_nevada_merged.tif')
-dem = grid.read_raster('files/sierra_nevada_merged.tif')
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+grid = Grid.from_raster('../files/sierra_nevada_merged.tif')
+dem = grid.read_raster('../files/sierra_nevada_merged.tif')
 flooded_dem = grid.fill_depressions(dem)
 inflated_dem = grid.resolve_flats(flooded_dem)
 
@@ -45,6 +45,7 @@ meadow_Areas, acc_val, value_type = [], [], []
 upland_areas, average_slopes = [], []
 
 def watershedValues(meadowIdx):
+    ''' extract watershed values for the most likely watershed of the meadow based on pour point or lowest elevation '''
     # extract boundary coordinates of meadow
     meadow = shapefile.loc[meadowIdx, :]
     feature, meadowId, meadowArea = meadow.geometry, int(meadow.ID), meadow.Area_km2
@@ -136,12 +137,12 @@ for meadowIdx in shapefile.index:
     watersheds.loc[meadowIdx, :] = watershedValues(meadowIdx)
 
 # write values to csv and delineated watersheds to a shapefile
-watersheds.to_csv("csv/watersheds.csv", index=False)
+watersheds.to_csv("../csv/watersheds.csv", index=False)
 watersheds_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'meadow_Id': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'uplandArea': upland_areas, 'avg_slope': average_slopes}, geometry = 'geometry', crs=shapefile.crs)
 points_gdf = gpd.GeoDataFrame({'geometry': watershed_polygons, 'ID': meadowIds, 'x_pour_pt': x_pour_points, 'y_pour_pt': y_pour_points, 'Area_km2': meadow_Areas, "Max_Flow_Acc": acc_val, "Value_Type": value_type}, geometry = 'geometry', crs=shapefile.crs)
 # Save watersheds to a new shapefile
-watersheds_gdf.to_file("files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
-points_gdf.to_file("files/Pour_points.shp", driver="ESRI Shapefile")
+watersheds_gdf.to_file("../files/Meadow_Watersheds.shp", driver="ESRI Shapefile")
+points_gdf.to_file("../files/Pour_points.shp", driver="ESRI Shapefile")
 
 # upland_area * 90**2     # Probable area in square meters
 # slope_at_pour/(90**2)   # Probable slope in degrees

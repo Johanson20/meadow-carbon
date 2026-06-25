@@ -5,8 +5,8 @@ library(rgl)
 graphics.off()
 rm(list = ls())
 
-setwd("C:/Users/jonyegbula/Documents/PointBlue/Code")
-data <- read.csv("csv/data.csv")
+setwd("Code")      # adjust directory
+data <- read.csv("../csv/data.csv")
 # drop rows where AGB values are NAs or empty
 ids = which(is.na(data$HerbBio.g.m2) == T)
 data <- data[-ids, ]

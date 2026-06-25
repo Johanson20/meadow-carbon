@@ -14,15 +14,15 @@ import geopandas as gpd
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
 from shapely.geometry import box
-warnings.filterwarnings("ignore")
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 folder_id = "1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"     # characters after the "folders/" in G-drive url
 ee.Initialize()
 
 def G_driveAccess():
+    ''' Authenticate and create the PyDrive client for google drive access '''
     global drive
     # Authenticate and create the PyDrive client for google drive access
     gauth = GoogleAuth()
@@ -39,7 +39,7 @@ def G_driveAccess():
 
 G_driveAccess()
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 
 # download 10m USGS DEM
 USGS_dem = ee.Image("USGS/3DEP/10m").select('elevation')
@@ -75,4 +75,4 @@ for idx in range(0, nFlows, 5000):   # GEE's limit is 5000 features
 all_gdfs = gpd.GeoDataFrame(pd.concat(gdf_list, ignore_index=True))
 all_gdfs.drop_duplicates(inplace=True)
 all_gdfs.reset_index(drop=True, inplace=True)
-all_gdfs.to_file("files/sierra_nevada_flowlines.shp", driver="ESRI Shapefile")
+all_gdfs.to_file("../files/sierra_nevada_flowlines.shp", driver="ESRI Shapefile")

@@ -20,7 +20,7 @@ import geemap
 from shapely.geometry import Polygon
 from joblib import Parallel, delayed
 
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory suitably (one folder up based on paths of other files being created)
 os.chdir(mydir)
 
 ee.Initialize()
@@ -36,7 +36,7 @@ def resample11(image):
 
 
 def generateCombinedPolarisImage(crs, shapefile_bbox):
-    # clip relevant images to meadow's bounds
+    ''' combine polaris bands into one multi-band image within meadow's bounds '''
     if crs == "EPSG:32611":
         shall_clay = shallow_perc_clay_11.clip(shapefile_bbox)
         d_clay = deep_perc_clay_11.clip(shapefile_bbox)
@@ -70,7 +70,7 @@ def generateCombinedPolarisImage(crs, shapefile_bbox):
 
 
 def generateCombinedDEMImage(crs, shapefile_bbox):
-    # clip relevant images to meadow's bounds
+    ''' combine elevation and slope bands into one multi-band image within meadow's bounds '''
     if crs == "EPSG:32611":
         elev_10m = dem_11.clip(shapefile_bbox)
         slope_10m = slope_11.clip(shapefile_bbox)
@@ -83,6 +83,7 @@ def generateCombinedDEMImage(crs, shapefile_bbox):
 
 
 def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilesplit=0):
+    ''' split large meadows into small regions '''
     subregions = [shapefile_bbox] if makeSubRegions else 1
     if feature.Area_km2 > 100 or tilesplit > 0:     # split bounds of large meadows into smaller regions
         xmin, ymin, xmax, ymax = feature.geometry.bounds
@@ -106,6 +107,7 @@ def splitMeadowBounds(feature, makeSubRegions=True, shapefile_bbox=None, tilespl
 
 
 def downloadImageBands(shapefile_bbox, imagename, feature, combined_image):
+    ''' downloads multi-band geotiffs directly to local storage '''
     mycrs = feature.epsgCode
     # either directly download images of small meadows locally or export large ones to google drive before downloading locally
     image_name = f'{imagename}.tif'
@@ -177,6 +179,7 @@ allIds = shapefile.ID
 
 
 def downloadMeadowBands(meadowId):
+    ''' function to search GEE polaris dataset and extract relevant bands, combine them and download geotiffs '''
     try:
         imageDEMname = f'files/meadow_prioritization/Meadow_DEM_{meadowId}'
         if os.path.exists(imageDEMname+".tif"):
@@ -204,7 +207,7 @@ def downloadMeadowBands(meadowId):
 
 
 def geotiffsToDataFrame():
-    # creates a single dataframe of all geotiffs
+    ''' creates a single dataframe combining all downloaded geotiffs '''
     all_files = [f for f in glob.glob("files/meadow_prioritization/Meadow_Polaris*.tif")]
     all_data = pd.DataFrame(columns=bandnames)
     # create list of lists to store each Polaris band

@@ -13,7 +13,7 @@ mydir = "Code"      # adjust directory
 os.chdir(mydir)
 
 # read csv file and convert dates from strings to datetime
-data = pd.read_csv("csv/meadow.csv")
+data = pd.read_csv("../csv/meadow.csv")
 data.head()
 
 # Authenticate and Initialize the Earth Engine API
@@ -27,8 +27,9 @@ flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1')
 dem = ee.Image('USGS/3DEP/10m').select('elevation')
 slopeDem = ee.Terrain.slope(dem)
 
+
 def maskClouds(image):
-    # mask out cloud based on bits in QA_pixel
+    ''' mask out cloud based on bits in QA_pixel '''
     qa = image.select('QA_PIXEL')
     dilated_cloud = qa.bitwiseAnd(1 << 1).eq(0)
     cloud = qa.bitwiseAnd(1 << 3).eq(0)
@@ -36,6 +37,7 @@ def maskClouds(image):
     # update image with combined mask
     cloud_mask = dilated_cloud.And(cloud).And(cloudShadow)
     return image.updateMask(cloud_mask)
+
 
 Blue, Green, Red, NIR, SWIR_1, SWIR_2 = [], [], [], [], [], []
 flow, slope, elevation = [], [], []
@@ -107,9 +109,9 @@ data['BSI'] = ((data['Red'] + data['SWIR_1']) - (data['NIR'] + data['Red']))/(da
 
 data.head()
 
-# checks how many pixels are cloud free (non-null value);
+# checks how many pixels are cloud free (non-null values): should equal data.shape[0]
 ids = [x for x in Blue if x]
 len(ids)
 
 # write updated dataframe to new csv file
-data.to_csv('csv/meadow_Data.csv', index=False)
+data.to_csv('../csv/meadow_Data.csv', index=False)

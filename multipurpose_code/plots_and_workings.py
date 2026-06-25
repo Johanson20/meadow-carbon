@@ -24,7 +24,7 @@ for asset in assets_2007: ee.data.deleteAsset(asset)'''
 acl_update = {'all_users_can_read': True}
 asset = "projects/ee-jonyegbula/assets/"
 for year in range(1984, 2025):
-    tifs = glob.glob(f"files/results/{year}*.tif")
+    tifs = glob.glob(f"../files/results/{year}*.tif")
     for tif in tifs:
         asset_id = asset + tif[14:-4]
         try:
@@ -36,7 +36,7 @@ for year in range(1984, 2025):
 # get max 98th percentile value for each attribute for GEE app
 store = [0,0,0,0,0,0, 0,0,0,0,0,0]
 for year in range(1986, 2025):
-    data = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
+    data = pd.read_csv(f"../files/results/{year}_Meadow_flux.csv")
     for i in range(12):
         col = data.columns[i+2]
         store[i] = max(store[i], data[col].quantile(0.98))
@@ -54,11 +54,11 @@ data['BNPP'] = data['Root_Turnover'] + data['Root_Exudates']
 data.head()
 
 # limit NEP values to 1000 and include ID/Jepson region in CSVs
-data = pd.read_csv("files/results/2024_Meadow_flux.csv")
+data = pd.read_csv("../files/results/2024_Meadow_flux.csv")
 jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
 for year in range(1984, 2025):
-    outfile = f'files/results/{year}_Meadow_flux.csv'
-    statsfile = f'files/results/{year}_Meadows_stats.csv'
+    outfile = f'../files/results/{year}_Meadow_flux.csv'
+    statsfile = f'../files/results/{year}_Meadows_stats.csv'
     stats = pd.read_csv(statsfile)
     stats['ID'], stats['PixelCount'] = [int(x) for x in stats['ID']], [int(x) for x in stats['PixelCount']]
     allID, allJep = [], []
@@ -81,14 +81,14 @@ print("Correlation coefficient (R) = {:.4f}".format(test_corr[0][1]))
 print("\nMean Training Percentage Bias = {:.4f} %\nMean Test Percentage Bias = {:.4f} %".format(train_p_bias, test_p_bias))
 
 
-with PdfPages('files/Largest.pdf') as pdf:
+with PdfPages('../files/Largest.pdf') as pdf:
     fig, ax = plt.subplots(figsize=(8, 6))
     gdf.plot(column=response_col, cmap=ListedColormap(['#FF0000', '#FFFF00', '#00FFFF', '#0000FF']), legend=True, ax=ax)
     pdf.savefig(fig)
     plt.close(fig)
 
 
-data = pd.read_csv("csv/Aboveground Biomass_RS Model_5_year_Data.csv")
+data = pd.read_csv("../csv/Aboveground Biomass_RS Model_5_year_Data.csv")
 BNPPs, ANPPs = [], []
 for idx in range(data.shape[0]):
     # extract coordinates and date from csv
@@ -96,7 +96,7 @@ for idx in range(data.shape[0]):
     point = ee.Geometry.Point(x, y)
     target_date = data.loc[idx, 'SampleDate']
     year, month, day = target_date.split("-")
-    df = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
+    df = pd.read_csv(f"../files/results/{year}_Meadow_flux.csv")
     # next_month = str(int(month)+1) if int(month) > 8 else "0" + str(int(month)%12+1)
     prev_5_year = str(int(year)-6) + "-10-01"
     
@@ -109,15 +109,15 @@ for idx in range(data.shape[0]):
         continue
 
 for year in range(1984, 2025):
-    # df = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
-    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
+    # df = pd.read_csv(f"../files/results/{year}_Meadow_flux.csv")
+    data = pd.read_csv(f"../files/results/{year}_Meadows_stats.csv")
     # data['ID'] = data['ID'].astype(int)
     # data = data.sort_values(by='ID', ascending=True)
     # data['NEP_Cap_1000_mean'] = list(df.groupby('ID')['NEP_Cap_1000'].mean())
     # data['NEP_sum'] = list(df.groupby('ID')['NEP'].sum())
     # data['NEP_Cap_1000_sum'] = list(df.groupby('ID')['NEP_Cap_1000'].sum())
     data[['NEP_Cap_1000_sum', 'NEP_sum']] *= 900
-    data.to_csv(f"files/results/{year}_Meadows_stats.csv", index=False)
+    data.to_csv(f"../files/results/{year}_Meadows_stats.csv", index=False)
     print(year, end=' ')
     x = len([x for x in df['NEP'] if x >= 1000])
     val = x/df.shape[0]*100
@@ -127,7 +127,7 @@ for year in range(1984, 2025):
 
 
 from shapely.geometry import Point
-data = pd.read_csv("csv/Belowground Biomass_RS Model_5_year_Data.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_5_year_Data.csv")
 data["geometry"] = data.apply(lambda r: Point(r.Longitude, r.Latitude), axis=1)
 data = gpd.GeoDataFrame(data, geometry="geometry", crs="EPSG:4326")
 all_data = gpd.sjoin(data, shapefile[["ID","geometry"]], how="left")
@@ -150,7 +150,7 @@ def get_closest_nep(csv_path, meadow_id, lon, lat, chunksize=200000):
 
 results = []
 for _, r in all_data.iterrows():
-    nep = get_closest_nep(f"files/results/{year}_Meadow_flux.csv", r.ID, r.Longitude, r.Latitude)
+    nep = get_closest_nep(f"../files/results/{year}_Meadow_flux.csv", r.ID, r.Longitude, r.Latitude)
     results.append(nep)
     if _%20 == 0: print(_, end=' ')
 
@@ -159,13 +159,13 @@ data["Model_BNPP"] = x["Model_BNPP"]
 data["Model_Rh"] = x["Model_Rh"]
 data["Model_NEP"] = x["Model_NEP"]
 data.drop("geometry", axis=1, inplace=True)
-data.to_csv("csv/Belowground Biomass_RS Model_NPP.csv", index=False)
+data.to_csv("../csv/Belowground Biomass_RS Model_NPP.csv", index=False)
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_NPP.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_NPP.csv")
 data['Model_NPP'] = data['Model_ANPP'] + data['Model_BNPP']
 
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_NPP.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_NPP.csv")
 data.dropna(subset=['BNPP', 'LandsatNPP', 'ModisNPP'], inplace=True)
 with plt.style.context('default'):
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -193,9 +193,9 @@ with plt.style.context('default'):
     ax.set_title("Scatter Plot of Training sample BNPP and Satellite Estimated NPP (Net Primary Production)", fontweight='bold')
     ax.legend()
     fig.tight_layout()
-    fig.savefig("files/BGB_NPP.png", dpi=300)
+    fig.savefig("../files/BGB_NPP.png", dpi=300)
     plt.close(fig)
-data = pd.read_csv("csv/Aboveground Biomass_RS Model_NPP.csv")
+data = pd.read_csv("../csv/Aboveground Biomass_RS Model_NPP.csv")
 data.dropna(subset=['ANPP', 'LandsatNPP', 'ModisNPP'], inplace=True)
 with plt.style.context('default'):
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -223,12 +223,12 @@ with plt.style.context('default'):
     ax.set_title("Scatter Plot of Training sample ANPP and Satellite Estimated NPP (Net Primary Production)", fontweight='bold')
     ax.legend()
     fig.tight_layout()
-    fig.savefig("files/AGB_NPP.png", dpi=300)
+    fig.savefig("../files/AGB_NPP.png", dpi=300)
     plt.close(fig)
 
 
-data = pd.read_csv("csv/Belowground Biomass_RS Model_NPP.csv")
-data1 = pd.read_csv("csv/Aboveground Biomass_RS Model_NPP.csv")
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_NPP.csv")
+data1 = pd.read_csv("../csv/Aboveground Biomass_RS Model_NPP.csv")
 data['Year'] = [x[:4] for x in data['SampleDate']]
 data1['Year'] = [x[:4] for x in data1['SampleDate']]
 data2 = pd.merge(data, data1, on=['ID', 'Year'])
@@ -260,13 +260,13 @@ with plt.style.context('default'):
     ax.set_title("Training Data vs Satellite NPP", fontweight='bold', fontsize=10)
     ax.legend()
     fig.tight_layout()
-    fig.savefig("files/NPP_Comparison.png", dpi=300)
+    fig.savefig("../files/NPP_Comparison.png", dpi=300)
     plt.close(fig)
 
 df = pd.DataFrame({'Training_Data': list(data2['NPP']), 'Modis': list(data2['ModisNPP_x']), 'Landsat': list(data2['LandsatNPP_x'])})
-df.to_csv("files/NPP_comparison.csv", index=False)
+df.to_csv("../files/NPP_comparison.csv", index=False)
 
-df = pd.read_csv("files/GHG_var_importance.csv")
+df = pd.read_csv("../files/GHG_var_importance.csv")
 feat_imp = df['Importance']
 sorted_idx = np.argsort(feat_imp)
 pos = np.arange(sorted_idx.shape[0]) + 0.5
@@ -282,7 +282,7 @@ with plt.style.context('default'):
     # ax.set_title("Belowground Biomass", fontsize=16, fontweight='bold')
     ax.set_xlabel("Importance", fontsize=18, fontweight='bold')
     fig.tight_layout()
-    fig.savefig("files/GHG_importance.png", dpi=300)
+    fig.savefig("../files/GHG_importance.png", dpi=300)
     plt.close(fig)
 
 with plt.style.context('default'):
@@ -310,22 +310,22 @@ with plt.style.context('default'):
         label.set_fontweight('bold')
     ax.legend()
     fig.tight_layout()
-    fig.savefig("files/GHG_scatterplot.png", dpi=300)
+    fig.savefig("../files/GHG_scatterplot.png", dpi=300)
     plt.close(fig)
 
 df = pd.DataFrame({'Predicted': list(y_test_pred), 'Actual': y_test})
-df.to_csv("files/GHG_scatter.csv", index=False)
+df.to_csv("../files/GHG_scatter.csv", index=False)
 df = pd.DataFrame({'Variable': list(np.array(ghg_model.feature_names_in_)[sorted_idx]), 'Importance': np.array(ghg_model.feature_importances_)[sorted_idx]})
-df.to_csv("files/GHG_var_importance.csv", index=False)
+df.to_csv("../files/GHG_var_importance.csv", index=False)
 
 NEP_mean = []
 time_ser = range(1984, 2025)
 for year in time_ser:
-    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
+    data = pd.read_csv(f"../files/results/{year}_Meadows_stats.csv")
     NEP_mean.append(data.NEP_mean.mean())
 df = pd.DataFrame({'Year': list(time_ser), 'NEP': NEP_mean})
 summary = df.groupby('Year')['NEP'].first()
-with PdfPages('files/Histogram.pdf') as pdf:
+with PdfPages('../files/Histogram.pdf') as pdf:
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.bar(summary.index.astype(str), summary.values, alpha=0.6)
     ax.plot(summary.index.astype(str), summary.values, marker='o', linewidth=2, label="Mean NEP")
@@ -341,8 +341,8 @@ with PdfPages('files/Histogram.pdf') as pdf:
 
 # change ID of carbon model outputs to latest shapefile
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/SierraNevadaMeadow_V3.0.shp").to_crs(epsg_crs)
-shapefile2 = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/SierraNevadaMeadow_V3.0.shp").to_crs(epsg_crs)
+shapefile2 = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 # this creates a new "ID_2" column with the updated (correct IDs) from the final shapefile
 for meadowIdx in range(shapefile2.shape[0]):
     feature = shapefile2.loc[meadowIdx, :]
@@ -353,24 +353,24 @@ for meadowIdx in range(shapefile2.shape[0]):
 shapefile.geometry = shapefile.geometry.simplify(tolerance=0.00001, preserve_topology=True)
 shapefile.count_coordinates().sum()'''
 # save to file to be used for correcting others
-shapefile2.to_file("files/AllPossibleMeadows_2025-10-22.shp", driver="ESRI Shapefile")
+shapefile2.to_file("../files/AllPossibleMeadows_2025-10-22.shp", driver="ESRI Shapefile")
 
 # create "ID_2" for meadow stats files
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 for year in range(1984, 2025):
-    data = pd.read_csv(f"files/results/{year}_Meadows_stats.csv")
+    data = pd.read_csv(f"../files/results/{year}_Meadows_stats.csv")
     data['ID_2'] = data['ID']
     for meadowIdx in range(data.shape[0]):
         oldId = data.loc[meadowIdx, :]
         newID = shapefile[shapefile.ID == oldId.ID].iloc[0]
         data.loc[meadowIdx, 'ID_2'] = newID.ID_2
-    data.to_csv(f"files/results/{year}_Meadows_stats.csv", index=False)
+    data.to_csv(f"../files/results/{year}_Meadows_stats.csv", index=False)
     print(year, end=' ')
 
 # create "ID_2" for meadow pixel level files
 for year in range(1985, 2025):
-    data = pd.read_csv(f"files/results/{year}_Meadows.csv")
-    data1 = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
+    data = pd.read_csv(f"../files/results/{year}_Meadows.csv")
+    data1 = pd.read_csv(f"../files/results/{year}_Meadow_flux.csv")
     data['ID_2'] = data['ID']
     data1['ID_2'] = data1['ID']
     oldID = set(data.ID)
@@ -379,24 +379,24 @@ for year in range(1985, 2025):
         data.loc[(data.ID == meadowId), 'ID_2'] = newID.ID_2
         data1.loc[(data1.ID == meadowId), 'ID_2'] = newID.ID_2
     if year == 2024:    # for single CSV of unchanging (time-constant) variables
-        data2 = pd.read_csv("files/results/Meadow_static_variables.csv")
+        data2 = pd.read_csv("../files/results/Meadow_static_variables.csv")
         data2['ID_2'] = data2['ID']
         oldID = set(data2.ID)
         for meadowId in oldID:
             newID = shapefile[shapefile.ID == meadowId].iloc[0]
             data2.loc[(data2.ID == meadowId), 'ID_2'] = newID.ID_2
-        data2.to_csv("files/results/Meadow_static_variables.csv", index=False)
-    data.to_csv(f"files/results/{year}_Meadows.csv", index=False)
-    data1.to_csv(f"files/results/{year}_Meadow_flux.csv", index=False)
+        data2.to_csv("../files/results/Meadow_static_variables.csv", index=False)
+    data.to_csv(f"../files/results/{year}_Meadows.csv", index=False)
+    data1.to_csv(f"../files/results/{year}_Meadow_flux.csv", index=False)
     print(year, end=' ')
 
 # rename all post-prediction geotiffs and csv outputs from carbon model (wasn't run due to ID conflicts: see 10320)
 for endname in ["tif", "csv"]:
     for year in range(1984, 2025):
-        all_files = [f for f in glob.glob(f"files/{year}/*.{endname}")]
+        all_files = [f for f in glob.glob(f"../files/{year}/*.{endname}")]
         for file in all_files:
             os.rename(file, file[:-4] + f"_name.{endname}")
-        all_files = [f for f in glob.glob(f"files/{year}/*.{endname}")]
+        all_files = [f for f in glob.glob(f"../files/{year}/*.{endname}")]
         for file in all_files:
             newName = file.split("_")
             oldId = int(newName[2])
@@ -407,9 +407,9 @@ for endname in ["tif", "csv"]:
 
 # drop min and max of each column in meadow summary stats files
 for year in range(1985, 2025):
-    flux_outfile = f"files/results/{year}_Meadow_flux.csv"
-    var_outfile = f"files/results/{year}_Meadows.csv"
-    stats_outfile = f"files/results/{year}_Meadows_stats.csv"
+    flux_outfile = f"../files/results/{year}_Meadow_flux.csv"
+    var_outfile = f"../files/results/{year}_Meadows.csv"
+    stats_outfile = f"../files/results/{year}_Meadows_stats.csv"
     data = pd.read_csv(stats_outfile)
     data1 = pd.read_csv(var_outfile)
     data2 = pd.read_csv(flux_outfile)
@@ -439,11 +439,11 @@ for year in range(1985, 2025):
 
 # add NEP cap 1000 column to meadow summary stats files
 for year in range(1985, 2025):
-    stats_outfile = f"files/results/{year}_Meadows_stats.csv"
+    stats_outfile = f"../files/results/{year}_Meadows_stats.csv"
     data = pd.read_csv(stats_outfile)
     # drop these columns as they aren't finalized
     data.drop(['PercentC_mean', 'PercentC_std', 'SoilC_mean', 'SoilC_std'], axis=1, inplace=True)
-    data2 = pd.read_csv(f"files/results/{year}_Meadow_flux.csv")
+    data2 = pd.read_csv(f"../files/results/{year}_Meadow_flux.csv")
     stats = (data2.assign(NEP=data2.NEP.clip(upper=1000)).groupby('ID')['NEP'].agg(NEP_Cap_1000_mean='mean', NEP_Cap_1000_sum='sum'))
     data = data.merge(stats, on='ID', how='left')    
     data.to_csv(stats_outfile, index=False)
@@ -451,21 +451,21 @@ for year in range(1985, 2025):
 
 # create meadow-level  summary of temporally unchanging variables
 mycols = ['ID', 'Jepson_Region', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter', 'ID_2']
-data = pd.read_csv("files/results/Meadow_static_variables.csv")
+data = pd.read_csv("../files/results/Meadow_static_variables.csv")
 data2 = data.groupby('ID')[['ID', 'Jepson_Region', 'ID_2']].first()
 for col in mycols[2:-1]:
     stats = data.assign(col=data[col]).groupby('ID')[col].mean()
     data2[col] = list(stats)    
     print(col, end=' ')
-data2.to_csv("files/results/Meadow_static_summary.csv")
+data2.to_csv("../files/results/Meadow_static_summary.csv")
 
 # rename all pre-prediction geotiffs from carbon model (wasn't run due to ID conflicts: see 10327 to 10320)
 endname = "csv"
 for year in range(1984, 2025):
-    all_files = [f for f in glob.glob(f"files/bands/{year}/*.{endname}")]
+    all_files = [f for f in glob.glob(f"../files/bands/{year}/*.{endname}")]
     for file in all_files:
         os.rename(file, file[:-4] + f"_name.{endname}")
-    all_files = [f for f in glob.glob(f"files/bands/{year}/*.{endname}")]
+    all_files = [f for f in glob.glob(f"../files/bands/{year}/*.{endname}")]
     for file in all_files:
         newName = file.split("_")
         oldId = int(newName[2])
@@ -476,7 +476,7 @@ for year in range(1984, 2025):
 
 # assess significance of difference between mean and slope of NEP components before and after fires (5 year ranges)
 from scipy import stats
-df = pd.read_csv("csv/burned_meadows_5_year_stats.csv")
+df = pd.read_csv("../csv/burned_meadows_5_year_stats.csv")
 mycols = ['ANPP', 'BNPP', 'Rh', 'NEP']
 vals = ["Mean", "Slope"]
 for val in vals:
@@ -492,12 +492,12 @@ plt.legend()
 
 # code to regenerate NEP predictions when any carbon model is changed
 epsg_crs = "EPSG:4326"
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
-utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
+utm_zone10 = gpd.read_file("../files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 res = 30
 year = 2024
-inputdir = f"files/{year}"
+inputdir = f"../files/{year}"
 all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
 
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
@@ -525,7 +525,7 @@ all_data = pd.concat(df_parts, ignore_index=True)
 all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
 utm_lons, utm_lats = all_data['X'], all_data['Y']
 for variable in ["ANPP", "BNPP", "NEP"]:
-    outfile = f"files/results/{year}_{variable}_4.tif"
+    outfile = f"../files/results/{year}_{variable}_4.tif"
     pixel_values = all_data[variable]
     gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
     out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))

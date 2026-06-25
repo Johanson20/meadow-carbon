@@ -4,7 +4,7 @@ rm(list=ls())
 
 library(terra)
 
-mydir <- "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir <- "Code"      # adjust directory
 setwd(mydir)
 
 # function to plot timeseries of multiband images (provide full path name) or a folder of single band images (provide unzipped folder name)
@@ -48,5 +48,5 @@ plotTimeSeries <- function(imagepath, years){
   legend("topright", legend = c("Mean", "Median", "SD"), col = c("blue", "green", "red"), pch = c(16, 17, 18), lty = 1)
 }
 
-plotTimeSeries("files/single_band_NEP", c(1986:2024))
-plotTimeSeries("files/multi_band_NEP.tif", c(1986:2024))
+plotTimeSeries("../files/single_band_NEP", c(1986:2024))
+plotTimeSeries("../files/multi_band_NEP.tif", c(1986:2024))

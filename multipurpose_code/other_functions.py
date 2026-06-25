@@ -26,7 +26,7 @@ from geocube.api.core import make_geocube
 
 warnings.filterwarnings("ignore")
 gdal.SetConfigOption("GTIFF_SRS_SOURCE", "EPSG")
-os.chdir("Code")    # change path to where github code is pulled from
+os.chdir("Code")      # adjust directory suitably (one folder up based on paths of other files being created)
 
 
 def GeotiffFromGEEImage(GEE_image, bounding_box, geotiffname, bandnames, epsg, res=30):
@@ -125,6 +125,7 @@ def geotiffToCsv(input_raster, csvfile, folderPath="", epsg=4326):
 
 
 def downloadDriveGeotiffs(nameId, delete=False, subfolder="", folder_id="1RpZRfWUz6b7UpZfRByWSXuu0k78BAxzz"):
+    ''' locally download Google drive geotiffs, and permanently delete them from drive afterwards if selected '''
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
     if gauth.credentials is None:   # Authenticate if there are no valid credentials
@@ -160,8 +161,8 @@ utm_zone10 = gpd.read_file("files/CA_UTM10.shp").to_crs(epsg_crs)
 allIds = list(gpd.overlay(shapefile, utm_zone10, how="intersection").ID)
 
 def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res=30):
-    '''This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
-    into one file (geotiff, vrt and/or csv)'''
+    ''' This function combines all geotiffs (or csv files) of separate meadows in a specific UTM zone
+    into one file (geotiff, vrt and/or csv) '''
     variable = endname[:-4] if "," in endname else endname.split(".")[0]
     all_data = pd.DataFrame(columns=['Y', 'X', variable, 'ID', 'Jepson_Region'])
     stats_df = pd.DataFrame(columns=['ID', 'PixelCount', 'Mean', 'Stdev', 'Min', 'Max'])
@@ -255,6 +256,7 @@ def mergeToSingleFile(inputdir, outfile, endname, vrt_only=True, zone=32610, res
 
 
 def predictSoilandPercentCarbon(years):
+    ''' predict soil and carbon models of CSV level meadow data and generate geotiffs for each year '''
     # extract models for soil and percentage carbon
     with open('files/bgb_soil_models.pckl', 'rb') as f:
         percentc_model, soilc_model = pickle.load(f)
@@ -311,7 +313,9 @@ def predictSoilandPercentCarbon(years):
 
 
 def remakeFinalPredictions(year, makeStatic=False):
-    '''This regenerates NEP and soil/percent C predictions and standard errors (previous 2 functions) into grouped CSVs'''
+    '''
+    This regenerates NEP and soil/percent C predictions and standard errors (previous 2 functions) into grouped CSVs 
+    '''
     
     mycols = ['ID', 'Jepson_Region', 'X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP', '1SD_ANPP', '1SD_BNPP', '1SD_NEP', '1SD_Rh', 'Annual_Precipitation', 'AET', 'Active_growth_days', 'Minimum_temperature', 'Maximum_temperature', 'SRad', 'SWE', 'Wet_days', 'NDVI_June', 'NDWI_June', 'EVI_June', 'SAVI_June', 'BSI_June', 'NDPI_June', 'NDGI_June', 'NDVI_Sept', 'NDWI_Sept', 'EVI_Sept', 'SAVI_Sept', 'BSI_Sept', 'NDPI_Sept', 'NDGI_Sept', 'dBlue', 'dGreen', 'dRed', 'dNIR', 'dSWIR_1', 'dSWIR_2', 'dNDVI', 'dNDWI', 'dEVI', 'dSAVI', 'dBSI', 'dNDPI', 'dNDGI', 'Elevation', 'Slope', 'Shallow_Clay', 'Deep_Clay', 'Shallow_Sand', 'Deep_Sand', 'Shallow_Hydra_Conduc', 'Deep_Hydra_Conduc', 'Organic_Matter']
     
@@ -424,8 +428,8 @@ for year in range(1985, 2025):
 
 
 def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
-    '''This function splits a csv file of X and Y columns alongside other variables into separate geotiffs 
-    with a column represented as its own geotiff as a bandc'''
+    ''' This function splits a csv file of X and Y columns alongside other variables into separate geotiffs 
+    with a column represented as its own geotiff as a band '''
     df = pd.read_csv(inputdir)
     utm_lons, utm_lats = df['X'], df['Y']
     if not attributes:
@@ -446,8 +450,8 @@ def splitCSVToGeotiffs(inputdir, attributes=None, zone=4326, res=30):
 # splitCSVToGeotiffs("files/results/2021_Meadow_flux.csv", ['NEP', 'ANPP', 'BNPP', 'Rh'])
 
 
-# this function was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name
 def downloadFromDuplicatedDriveFolders(nameId, myfolder="", delete=True):
+    ''' This function is meant to do what downloadDriveGeotiffs does: it was created because of a GEE glitch (their fault) that makes gee exports create new folders each time with same name '''
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("mycreds.txt")
     if gauth.credentials is None:   # Authenticate if there are no valid credentials
@@ -508,8 +512,8 @@ shallow_hydra_cond = ee.ImageCollection(hydra_cond.toList(3)).mean()
 deep_hydra_cond = ee.Image(hydra_cond.toList(6).get(3))
 shallow_organic_m = ee.ImageCollection(organic_m.toList(3)).mean()
 
-# function to download a single variable for an entire region (Sierra Nevada used as example)
 def downloadOneGeotiff(GEEImage, shapefile, imagename, outfolder="", mycrs="EPSG:4326", res=30):
+    '''' function to download a single variable for an entire region (Sierra Nevada used as example) '''
     feature = shapefile.geometry.iloc[0]
     shapefile_bbox = ee.Geometry.Polygon(list(feature.exterior.coords))
     try:

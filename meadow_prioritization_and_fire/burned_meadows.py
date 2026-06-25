@@ -15,15 +15,15 @@ import ee
 # Authenticate and initialize python access to Google Earth Engine
 # ee.Authenticate()    # only use if you've never run this on your current computer before or loss GEE access
 ee.Initialize()
-mydir = "C:/Users/jonyegbula/Documents/PointBlue/Code"
+mydir = "Code"      # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 # read in shapefiles, convert to WGS '84 and filter burns to 1984 (landsat beginning)
 epsg_crs = "EPSG:4326"
-burn_shapefile = gpd.read_file("files/California_Fire_Perimeters__all_.shp").to_crs(epsg_crs)
+burn_shapefile = gpd.read_file("f../iles/California_Fire_Perimeters__all_.shp").to_crs(epsg_crs)
 burn_shapefile = burn_shapefile[burn_shapefile.YEAR_ >= '1984'].reset_index(drop=True)
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-04-01.shp").to_crs(epsg_crs)
 
 # initialize final dataframe
 burn_results = pd.DataFrame(columns = ["ID", "Burn_year", "Sides"])
@@ -51,7 +51,7 @@ for meadowIdx in range(shapefile.shape[0]):
     if meadowIdx % 500 == 0: print(meadowIdx, end=' ')
 
 # write dataframe to csv file and filter shapefiles by burn csv to write to new shp
-burn_results.to_csv("csv/Burned_meadows.csv", index=False)
+burn_results.to_csv("../csv/Burned_meadows.csv", index=False)
 merged_data = burn_results.merge(shapefile, on="ID", how="inner")
 burn_shp = gpd.GeoDataFrame(merged_data, geometry="geometry", crs=shapefile.crs)
-burn_shp.to_file("files/Burned_meadows.shp")
+burn_shp.to_file("../files/Burned_meadows.shp")

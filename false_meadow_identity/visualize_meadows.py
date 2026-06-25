@@ -6,12 +6,13 @@
 import os, ee
 import geopandas as gpd
 import math
+
 os.chdir("Code")    # change path to directory of folder
 
 ee.Initialize()
 landsat8_collection = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate('2022-07-01', '2022-07-31')
 
-shapefile = gpd.read_file("files/AllPossibleMeadows_2025-10-22.shp")
+shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp")
 
 import geemap
 import ipyleaflet
@@ -19,15 +20,13 @@ import ipywidgets as widgets
 
 
 def zoom_level(area):
-    ''' zoom_level ranges from 10 (largest of 369.83082 km2) to 19 (smallest of 0.0007 km2) for all polygons
-     Each zoom-out approximately quadruples the area viewed (hence log 2)
-     calculate deviation or zoom-out extent from 19'''
+    ''' Calculates zoom level of region: zoom_level ranges from 10 (largest of 369.83082 km2) to 19 (smallest of 0.0007 km2) for all polygons. Each zoom-out approximately quadruples the area viewed (hence log 2): calculate deviation or zoom-out extent from 19'''
     tradeoff = math.log2(area/0.0007)
     return (19 - round(tradeoff/2))
 
 
-# change button value of selection to one of the options
 def handle_selection(change):
+    '''' change button value of selection to one of the options '''
     global selection
     if change['name'] == 'value' and change['new'] is not None:
         selection = True
@@ -57,7 +56,7 @@ for i in ids[:3]:   # modify to all IDs ("ids")
     
     Map.add_layer(geo_data)
     Map.add_control(output_control)
-    display(Map)
+    display(Map)    # this line only works on Jupyter for GEE map visualization.
     
     # waits until an option is selected
     while not selection:
