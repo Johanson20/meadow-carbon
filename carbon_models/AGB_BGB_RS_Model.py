@@ -419,6 +419,7 @@ from sklearn.inspection import PartialDependenceDisplay
 from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 import matplotlib.pyplot as plt
+import shap
 
 # read csv containing random samples
 data = pd.read_csv("../csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
@@ -519,6 +520,16 @@ bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimato
 bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
+
+# plot explain interaction effects among variables and variable importance using SHAP
+explainer = shap.TreeExplainer(bgb_model)
+shap_values = explainer(X_test)
+ax = plt.subplot()
+ax.grid(True)
+ax = shap.plots.beeswarm(shap_values, max_display=16, show=False, log_scale=False)
+ax.set_title("Global SHAP Values for AGB Model")
+plt.tight_layout()
+
 # Make partial dependence plots (3 by 3 per page)
 with PdfPages('../files/BGB_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
@@ -712,6 +723,16 @@ agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=13, n_estima
 agb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
 agb_84_model.fit(X_train, y_train)
+
+# plot explain interaction effects among variables and variable importance using SHAP
+explainer = shap.TreeExplainer(agb_model)
+shap_values = explainer(X_test)
+ax = plt.subplot()
+ax.grid(True)
+ax = shap.plots.beeswarm(shap_values, max_display=16, show=False, log_scale=False)
+ax.set_title("Global SHAP Values for AGB Model")
+plt.tight_layout()
+
 # Make partial dependence plots (3 by 3 per page)
 with PdfPages('../files/AGB_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):

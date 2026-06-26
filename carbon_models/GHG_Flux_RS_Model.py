@@ -8,6 +8,7 @@ import os
 import warnings
 import ee
 import pandas as pd
+import numpy as np
 
 mydir = "Code"      # adjust directory
 os.chdir(mydir)
@@ -226,7 +227,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import randint, uniform
-import numpy as np
+import shap
 
 # read csv containing random samples
 data = pd.read_csv("../csv/GHG_Flux_RS_Model_Data.csv")
@@ -331,6 +332,16 @@ ghg_model = GradientBoostingRegressor(learning_rate=0.02, max_depth=7, n_estimat
 ghg_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.02, max_depth=7, n_estimators=5000, subsample=1.0, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', random_state=10)
 ghg_model.fit(X_train, y_train)
 ghg_84_model.fit(X_train, y_train)
+
+# plot explain interaction effects among variables and variable importance using SHAP
+explainer = shap.TreeExplainer(ghg_model)
+shap_values = explainer(X_test)
+ax = plt.subplot()
+ax.grid(True)
+ax = shap.plots.beeswarm(shap_values, max_display=16, show=False, log_scale=False)
+ax.set_title("Global SHAP Values for AGB Model")
+plt.tight_layout()
+
 # Make partial dependence plots (3 by 3 per page)
 with PdfPages('../files/GHG_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):

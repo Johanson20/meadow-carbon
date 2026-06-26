@@ -287,6 +287,7 @@ from sklearn.inspection import PartialDependenceDisplay
 from matplotlib.backends.backend_pdf import PdfPages
 import seaborn as sns
 import matplotlib.pyplot as plt
+import shap
 
 # read csv containing random samples and model soil carbon
 data = pd.read_csv('../csv/Soil Carbon_RS Model_Data.csv')
@@ -365,6 +366,16 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 soilc_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=13, n_estimators=25, subsample=0.6, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 soilc_model.fit(X_train, y_train)
+
+# plot explain interaction effects among variables and variable importance using SHAP
+explainer = shap.TreeExplainer(soilc_model)
+shap_values = explainer(X_test)
+ax = plt.subplot()
+ax.grid(True)
+ax = shap.plots.beeswarm(shap_values, max_display=16, show=False, log_scale=False)
+ax.set_title("Global SHAP Values for AGB Model")
+plt.tight_layout()
+
 # Make partial dependence plots
 with PdfPages('../files/SoilC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
@@ -523,6 +534,16 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 percentc_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=8, n_estimators=50, subsample=0.3, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 percentc_model.fit(X_train, y_train)
+
+# plot explain interaction effects among variables and variable importance using SHAP
+explainer = shap.TreeExplainer(percentc_model)
+shap_values = explainer(X_test)
+ax = plt.subplot()
+ax.grid(True)
+ax = shap.plots.beeswarm(shap_values, max_display=16, show=False, log_scale=False)
+ax.set_title("Global SHAP Values for AGB Model")
+plt.tight_layout()
+
 # Make partial dependence plots
 with PdfPages('../files/PercentC_partial_dependence_plots.pdf') as pdf:
     for i in range(0, len(var_col), 9):
