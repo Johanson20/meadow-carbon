@@ -31,7 +31,7 @@ os.chdir("Code")      # adjust directory suitably (one folder up based on paths 
 
 def GeotiffFromGEEImage(GEE_image, bounding_box, geotiffname, bandnames, epsg, res=30):
     '''
-    Creates a single geotiff file of all "bandnames" in a constrained GEE image and plots a raster of each band. Supply constrained image like clipped flow accumulation, filtered gridmet/landsat, etc. and also the ee.Geometry region it was clipped to. Include epsg code of region, spatial resolution in meters, a list of valid bandnames in the image, as well as the raster's name
+    Extract specific band values for a single shapefile and visualizes each band. Supply constrained image like clipped flow accumulation, filtered gridmet/landsat, etc. and also the ee.Geometry region it was clipped to. Include epsg code of region, spatial resolution in meters, a list of valid bandnames in the image, as well as the raster's name
     '''
     myImage = GEE_image.select(bandnames)
     geemap.ee_export_image(myImage, filename=geotiffname, scale=res, region=bounding_box, crs='EPSG:'+epsg)

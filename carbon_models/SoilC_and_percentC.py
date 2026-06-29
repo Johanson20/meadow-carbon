@@ -364,6 +364,7 @@ train_data['SoilC'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
+# hyperparameter tuning is classed here with trainModel function and parallel code underneath
 soilc_model = GradientBoostingRegressor(learning_rate=0.08, max_depth=13, n_estimators=25, subsample=0.6, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 soilc_model.fit(X_train, y_train)
 
@@ -532,6 +533,7 @@ train_data['percentCarbon'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
+# hyperparameter tuning is called here with trainModel function and parallel code underneath
 percentc_model = GradientBoostingRegressor(learning_rate=0.16, max_depth=8, n_estimators=50, subsample=0.3, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 percentc_model.fit(X_train, y_train)
 

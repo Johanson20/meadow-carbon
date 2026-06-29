@@ -509,7 +509,7 @@ train_data['BGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
-# for the 5-year averaged data
+# hyperparameter tuning is called here with trainModel function and parallel code underneath
 bgb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 '''# soil carbon with summarized depths
 bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
@@ -719,6 +719,7 @@ train_data['AGB_bin_class'].value_counts()
 X_train, y_train = train_data.loc[:, var_col], train_data[y_field]
 X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
+# hyperparameter tuning is classed here with trainModel function and parallel code underneath
 agb_model = GradientBoostingRegressor(learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 agb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.25, max_depth=13, n_estimators=50, subsample=0.5, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', random_state=10)
 agb_model.fit(X_train, y_train)
