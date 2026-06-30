@@ -546,6 +546,7 @@ with open('files/bgb_soil_models.pckl', 'rb') as f:
     percentc_model, soilc_model = pickle.load(f)
 percentc_col, soilc_col = list(percentc_model.feature_names_in_), list(soilc_model.feature_names_in_)
 df_parts = []
+variable = 'PercentC'   # modify to SoilC for Soil Carbon Model
 all_data = pd.DataFrame(columns=(['Y', 'X'] + percentc_col))    # modify percentc_col to soilc_col for Soil Carbon Model
 for idx in range(len(all_files)):
     file = all_files[idx]
@@ -563,7 +564,7 @@ utm_lons, utm_lats = all_data['X'], all_data['Y']
 all_data[variable] = percentc_model.predict(all_data.loc[:, percentc_col])  # modify to soilc_col for Soil Carbon Model
 all_data.loc[all_data[variable] < 0, variable] = 0
 
-outfile = f"../files/results/{year}_{variable}_2.tif"
+outfile = f"../files/results/{year}_{variable}_A.tif"
 pixel_values = all_data[variable]
 gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
 out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
