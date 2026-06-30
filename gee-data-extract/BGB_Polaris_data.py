@@ -10,6 +10,8 @@ import ee
 import warnings
 import pandas as pd
 
+''' This code downloads various Polaris datasets at 4 different depths each for BGB samples '''
+
 mydir = "Code"      # adjust directory
 os.chdir(mydir)
 warnings.filterwarnings("ignore")

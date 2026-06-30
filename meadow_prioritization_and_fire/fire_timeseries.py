@@ -66,7 +66,7 @@ data.drop_duplicates(subset=['UniqueID', 'FireYear'], inplace=True)
 data.reset_index(drop=True, inplace=True)
 # select relevant columns and unique IDs for timeseries
 uniqueIds = list(set(data.UniqueID))
-mycols = ['X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP']
+mycols = ['X', 'Y', 'ANPP', 'BNPP', 'Rh', 'NEP']    # set variables here (always leave X and Y)
 cols = mycols[2:]
 years = list(range(1984, 2025))
 

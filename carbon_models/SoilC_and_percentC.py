@@ -289,7 +289,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import shap
 
-# read csv containing random samples and model soil carbon
+# read csv containing random samples and model "SOIL CARBON"
 data = pd.read_csv('../csv/Soil Carbon_RS Model_Data.csv')
 data.head()
 cols = data.columns
@@ -459,7 +459,7 @@ np.array(soilc_model.feature_names_in_)[sorted_idx]
 np.array(soilc_model.feature_importances_)[sorted_idx]
 
 
-# read csv containing random samples and model percent carbon
+# read csv containing random samples and model "PERCENT CARBON"
 data = pd.read_csv('../csv/Soil Carbon_RS Model_Data.csv')
 data.head()
 cols = data.columns

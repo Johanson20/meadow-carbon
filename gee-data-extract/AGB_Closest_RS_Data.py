@@ -8,6 +8,8 @@ import ee
 import pandas as pd
 os.chdir("Code")    # adjust directory
 
+''' This code downloads NIR Landsat values for AGB samples at dates closest to the sample date '''
+
 # read csv file and convert dates from strings to datetime
 data = pd.read_csv("../csv/ChronoRS_AGB.csv")
 data.head()

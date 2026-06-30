@@ -6,6 +6,7 @@ Created on Mon Jun 29 16:48:37 2026
 """
 
 # This is for predicting soil and percent carbon
+import os
 import glob
 import pandas as pd
 import geopandas as gpd
@@ -14,6 +15,8 @@ import warnings
 import pickle
 from geocube.api.core import make_geocube
 
+mydir = "Code"      # adjust directory
+os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 epsg_crs = "EPSG:4326"
@@ -48,7 +51,7 @@ def makeFluxPredictions(year, makeStatic=False):
     all_var_data = pd.DataFrame(columns=var_col)
     all_static_data = pd.DataFrame(columns=static_col)
     
-    # create summary statistics dataframe for each variable
+    # create a dataframe of summary statistics (mean and stdev columns) for each variable
     statCol = ['ID', 'PixelCount']
     for col in mycols[2:20] + ['NEP_Cap_1000']:
         if col in mycols[2:4]:
@@ -67,7 +70,7 @@ def makeFluxPredictions(year, makeStatic=False):
             jepson = shapefile[shapefile.ID == meadowId].EcoRegion.values[0]
             df = pd.read_csv(file)
             
-            # Predict AGB/BGB and set negative values to zero, then convert to NEP
+            # Re-predict AGB/BGB and standard errors then convert to NEP (comment out lines 71-88)
             rh_draws = np.random.normal(df['Rh'].to_frame(), df['1SD_Rh'].to_frame(), size=(len(df['Rh']), 100))
             df['HerbBio.g.m2'] = agb_model.predict(df.loc[:, agb_col])
             df['Roots.kg.m2'] = bgb_model.predict(df.loc[:, bgb_col])
@@ -86,7 +89,6 @@ def makeFluxPredictions(year, makeStatic=False):
             bnpp_draws = np.random.normal(df['BNPP'].to_frame(), df['1SD_BNPP'].to_frame(), size=(len(df['BNPP']), 100))
             df['NEP'] = df['ANPP'] + df['BNPP'] - df['Rh']
             df['1SD_NEP'] = pd.Series(np.std((anpp_draws + bnpp_draws - rh_draws), axis=1))
-            # predict soil/percent C and set negative values to zero
             df['NEP_Cap_1000'] = [val if val <= 1000 else 1000 for val in df['NEP']]
             
             val = [meadowId, df.shape[0]]

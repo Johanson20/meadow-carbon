@@ -422,12 +422,7 @@ import matplotlib.pyplot as plt
 import shap
 
 # read csv containing random samples
-data = pd.read_csv("../csv/Belowground Biomass_RS Model_5_year_Data.csv")  # for the 5-year averaged data
-'''data = pd.read_csv("../csv/BGB_summarized_soil_depths.csv")  # soil carbon with summarized depths
-data = pd.read_csv("../csv/Belowground Biomass_RS Model_Data.csv")   # for the old "Data" (without 5 year averages)
-data = pd.read_csv("../csv/BGB_separated_soil_depths.csv")   # soil carbon with separated depths
-data['SampleDate'] = pd.to_datetime(data['SampleDate'])
-data = data[data['SampleDate'].dt.year.isin([2015, 2016])]
+data = pd.read_csv("../csv/Belowground Biomass_RS Model_5_year_Data.csv")
 # confirm column names first
 cols = data.columns[1:]     # drops unnecessary 'Unnamed: 0' column'''
 data.head()
@@ -438,9 +433,6 @@ data.drop_duplicates(inplace=True)
 
 # remove irrelevant columns for ML and determine X and Y variables
 var_col = [c for c in list(cols[10:]) if c not in ['dNDSI', 'Cdef', 'Flow', 'Lithology', 'Snow_days', 'NDVI_June', 'NDVI_Sept', 'Minimum_temperature', 'Maximum_temperature']]
-'''var_col = list(cols[20:26]) + list(cols[-13:])   # for the old "Data" (without 5 year averages)
-var_col = list(cols[20:26]) + list(cols[-18:])   # soil carbon with summarized depths
-var_col = list(cols[20:26]) + list(cols[-29:])   # soil carbon with separated depths'''
 y_field = 'Roots.kg.m2'
 # subdata excludes other measured values which can be largely missing (as we need to assess just one output at a time)
 subdata = data.loc[:, ([y_field] + var_col)]
@@ -511,12 +503,6 @@ X_test, y_test = test_data.loc[:, var_col], test_data[y_field]
 
 # hyperparameter tuning is called here with trainModel function and parallel code underneath
 bgb_model = GradientBoostingRegressor(learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
-'''# soil carbon with summarized depths
-bgb_model = GradientBoostingRegressor(learning_rate=0.07, max_depth=3, n_estimators=200, subsample=0.3, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-# for the old "Data" (without 5 year averages)
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=4, n_estimators=75, subsample=0.8, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)
-# soil carbon with separated depths
-bgb_model = GradientBoostingRegressor(learning_rate=0.1, max_depth=6, n_estimators=75, subsample=0.8, validation_fraction=0.2, n_iter_no_change=50, max_features='log2', verbose=1, random_state=10)'''
 bgb_84_model = GradientBoostingRegressor(loss="quantile", alpha=0.8413, learning_rate=0.05, max_depth=14, n_estimators=200, subsample=0.4, validation_fraction=0.2, n_iter_no_change=10, max_features='log2', verbose=1, random_state=10)
 bgb_model.fit(X_train, y_train)
 bgb_84_model.fit(X_train, y_train)
@@ -806,8 +792,13 @@ plotTrainY()
 np.array(agb_model.feature_names_in_)[sorted_idx]
 np.array(agb_model.feature_importances_)[sorted_idx]
 
+# load saved GHG model
+with open('files/carbon_models.pckl', 'rb') as f:
+    ghg_model, _, _ = pickle.load(f)
+with  open('files/carbon_sd_models.pckl', 'rb') as f:
+    ghg_84_model, _, _ = pickle.load(f)
 
-# save models for future use
+# save new models for future use
 with open('../files/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
     pickle.dump([ghg_model, agb_model, bgb_model], f)
 with open('../files/carbon_sd_models.pckl', 'wb') as f:

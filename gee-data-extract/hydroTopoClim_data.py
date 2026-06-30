@@ -9,6 +9,8 @@ import os
 import ee
 import pandas as pd
 
+''' This code downloads cloud-free flow, landsat and other topo-climatic variables for various points in meadows '''
+
 mydir = "Code"      # adjust directory
 os.chdir(mydir)
 

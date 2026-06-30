@@ -14,6 +14,8 @@ import warnings
 import pickle
 from geocube.api.core import make_geocube
 
+mydir = "Code"      # adjust directory
+os.chdir(mydir)
 warnings.filterwarnings("ignore")
 
 epsg_crs = "EPSG:4326"
@@ -32,7 +34,7 @@ def predictSoilandPercentCarbon(years):
     
     for myYear in years:
         # loop through each csv file and predict soil and percentage carbon based on model (per year)
-        outfile = f"files/results/{myYear}_Meadows.csv"
+        outfile = f"files/results/{myYear}_Soil_Perc_C.csv"
         all_files = [f for f in glob.glob(f"files/{myYear}/*.csv")]
         all_data = pd.DataFrame(columns=mycols)
         

@@ -8,6 +8,8 @@ import ee
 import pandas as pd
 os.chdir("Code")    # adjust directory
 
+''' This code downloads cloud-free Landsat bands for GHG samples at dates closest to the sample date within 30-day radius '''
+
 # read csv file and convert dates from strings to datetime
 data = pd.read_csv("csv/GHG_Data_Sample.csv")
 data['Date'] = pd.to_datetime(data['Date'], format = '%m/%d/%y')

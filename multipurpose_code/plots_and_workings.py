@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import ee
+import pickle
 from matplotlib.colors import ListedColormap
+from geocube.api.core import make_geocube
 
 ee.Initialize()
 
@@ -490,7 +492,7 @@ plt.ylabel("Mean_NEP")
 plt.title(f"NEP Comparison Before and After Fire")
 plt.legend()
 
-# code to regenerate NEP predictions when any carbon model is changed
+
 epsg_crs = "EPSG:4326"
 shapefile = gpd.read_file("../files/AllPossibleMeadows_2025-10-22.shp").to_crs(epsg_crs)
 utm_zone10 = gpd.read_file("../files/CA_UTM10.shp").to_crs(epsg_crs)
@@ -500,6 +502,10 @@ year = 2024
 inputdir = f"../files/{year}"
 all_files = [f for f in glob.glob(f"{inputdir}/*.csv")]
 
+
+# code to regenerate NEP predictions when any carbon model is changed (run/modify lines 496 - 503)
+with open('files/carbon_models.pckl', 'rb') as f:
+    ghg_model, agb_model, bgb_model = pickle.load(f)
 ghg_col, agb_col, bgb_col = list(ghg_model.feature_names_in_), list(agb_model.feature_names_in_), list(bgb_model.feature_names_in_)
 df_parts = []
 all_data = pd.DataFrame(columns=['Y', 'X', 'ANPP', 'BNPP', 'Rh', 'NEP'])
@@ -524,8 +530,8 @@ for idx in range(len(all_files)):
 all_data = pd.concat(df_parts, ignore_index=True)
 all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
 utm_lons, utm_lats = all_data['X'], all_data['Y']
-for variable in ["ANPP", "BNPP", "NEP"]:
-    outfile = f"../files/results/{year}_{variable}_4.tif"
+for variable in ["ANPP", "BNPP", "Rh", "NEP"]:
+    outfile = f"../files/results/{year}_{variable}_A.tif"
     pixel_values = all_data[variable]
     gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
     out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
@@ -533,3 +539,34 @@ for variable in ["ANPP", "BNPP", "NEP"]:
     out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
     out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")
     print(variable)
+
+
+# code to regenerate soil/percent C predictions when any carbon model is changed (run/modify lines 496 - 503)
+with open('files/bgb_soil_models.pckl', 'rb') as f:
+    percentc_model, soilc_model = pickle.load(f)
+percentc_col, soilc_col = list(percentc_model.feature_names_in_), list(soilc_model.feature_names_in_)
+df_parts = []
+all_data = pd.DataFrame(columns=(['Y', 'X'] + percentc_col))    # modify percentc_col to soilc_col for Soil Carbon Model
+for idx in range(len(all_files)):
+    file = all_files[idx]
+    zone = 32610 if int(file.split("_")[2][:-4]) in allIds else 32611
+    df = pd.read_csv(file)
+    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df['X'], df['Y']), crs=zone).to_crs(4326)
+    df['X'], df['Y'] = [p.x for p in gdf.geometry], [p.y for p in gdf.geometry]
+    df_parts.append(df[(['Y', 'X'] + percentc_col)])    # modify to soilc_col for Soil Carbon Model
+    if idx%1000 == 0: print(idx, end=" ")
+
+all_data = pd.concat(df_parts, ignore_index=True)
+all_data = all_data.dropna().drop_duplicates().reset_index(drop=True)
+utm_lons, utm_lats = all_data['X'], all_data['Y']
+
+all_data[variable] = percentc_model.predict(all_data.loc[:, percentc_col])  # modify to soilc_col for Soil Carbon Model
+all_data.loc[all_data[variable] < 0, variable] = 0
+
+outfile = f"../files/results/{year}_{variable}_2.tif"
+pixel_values = all_data[variable]
+gdf = gpd.GeoDataFrame(pixel_values, geometry=gpd.GeoSeries.from_xy(utm_lons, utm_lats), crs=epsg_crs).to_crs(3310)
+out_grd = make_geocube(vector_data=gdf, measurements=[variable], resolution=(-res, res))
+out_grd = out_grd.rio.reproject(epsg_crs)
+out_grd = out_grd.astype("float32").chunk({"x": 2048, "y": 2048})
+out_grd.rio.to_raster(outfile, tiled=True, compress="LZW", dtype="float32")

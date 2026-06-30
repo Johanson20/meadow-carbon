@@ -9,6 +9,7 @@ import warnings
 import ee
 import pandas as pd
 import numpy as np
+import pickle
 
 mydir = "Code"      # adjust directory
 os.chdir(mydir)
@@ -431,3 +432,15 @@ def plotY():
 
 plotFeatureImportance()
 plotY()
+
+# load saved AGB/BGB model
+with open('files/carbon_models.pckl', 'rb') as f:
+    _, agb_model, bgb_model = pickle.load(f)
+with  open('files/carbon_sd_models.pckl', 'rb') as f:
+    _, agb_84_model, bgb_84_model = pickle.load(f)
+
+# save new models for future use
+with open('../files/carbon_models.pckl', 'wb') as f:   # there is also an old models.pckl
+    pickle.dump([ghg_model, agb_model, bgb_model], f)
+with open('../files/carbon_sd_models.pckl', 'wb') as f:
+    pickle.dump([ghg_84_model, agb_84_model, bgb_84_model], f)
